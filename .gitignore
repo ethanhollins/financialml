@@ -1,0 +1,8 @@
+Lib/
+Include/
+Scripts/
+share/
+tcl/
+etc/
+LICENSE.txt
+*.zip
