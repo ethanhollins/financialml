@@ -1,8 +1,10 @@
+__pycache__/
 Lib/
 Include/
 Scripts/
 share/
 tcl/
 etc/
+data/
 LICENSE.txt
-*.zip
+options.json
