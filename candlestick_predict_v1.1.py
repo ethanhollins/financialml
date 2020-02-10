@@ -41,7 +41,7 @@ dl = DataLoader()
 
 all_df = []
 for product in products:
-	df = dl.get(product, Constants.FOUR_HOURS, start=dt.datetime(year=2010, month=1, day=1))
+	df = dl.get(product, Constants.FOUR_HOURS, start=dt.datetime(year=2005, month=1, day=1))
 	df = df.drop(columns=[k for k in df.keys() if k.startswith('ask')])
 	all_df.append(df)
 
@@ -127,7 +127,7 @@ def X_Y_candlestick_generator(data, lookback, MinMax=False):
 	return np.array(X), np.array(y), np.array(X_raw)
 
 cell_timer = MeasureTime()
-lookback = 10
+lookback = 5
 X = []
 y = []
 X_raw = []
@@ -174,10 +174,10 @@ Build the Model
 '''
 
 model = tf.keras.Sequential()
-model.add(tf.keras.layers.LSTM(units=64, dropout=0.1, return_sequences=True, input_shape=(None, X.shape[-1])))
-model.add(tf.keras.layers.LSTM(units=128, return_sequences=True))
-model.add(tf.keras.layers.LSTM(units=128))
-model.add(tf.keras.layers.Dense(units=1, activation='sigmoid'))
+model.add(tf.keras.layers.LSTM(units=32, dropout=0.1, return_sequences=True, input_shape=(None, X.shape[-1])))
+model.add(tf.keras.layers.LSTM(units=64, dropout=0.1, return_sequences=True))
+model.add(tf.keras.layers.LSTM(units=64, dropout=0.1))
+model.add(tf.keras.layers.Dense(units=1, activation='relu'))
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['acc'])
 
@@ -200,7 +200,7 @@ print('Test data: ' + 'X Input shape: ' + str(X_test.shape) + ', ' + 'y Output s
 
 # Train model
 cell_timer = MeasureTime()
-history = model.fit(X_train, y_train, batch_size=1000, epochs=200, validation_data=(X_val, y_val))
+history = model.fit(X_train, y_train, batch_size=1000, epochs=25, validation_data=(X_val, y_val))
 cell_timer.kill()
 
 # Chart 1 - Model loss
@@ -231,7 +231,7 @@ counter = 0
 won = 0
 lost = 0
 predictions = model.predict(X_test)
-alpha_distance = 0.45
+alpha_distance = 0.40
 
 
 for i in range(len(predictions)):
