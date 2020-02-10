@@ -65,7 +65,10 @@ class DataLoader(object):
 			data_path = os.path.join(data_dir, '{}-{}.csv'.format(y, y+1))
 			if os.path.exists(data_path):
 				t_data = pd.read_csv(data_path, sep=' ')
-				if y == end.year:
+				if y == start.year:
+					ts_start = self.convertTimeToTimestamp(start)
+					t_data = t_data.loc[t_data['timestamp'] >= ts_start]
+				elif y == end.year:
 					ts_end = self.convertTimeToTimestamp(end)
 					t_data = t_data.loc[t_data['timestamp'] <= ts_end]
 				frags.append(t_data)
@@ -175,6 +178,8 @@ class DataLoader(object):
 	def _oandaIsLastCandleFound(self, period, start_dt, end_dt, count):
 		if period == Constants.ONE_MINUTE:
 			return start_dt + datetime.timedelta(minutes=count) >= end_dt
+		if period == Constants.THIRTY_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*30) >= end_dt
 		elif period == Constants.ONE_HOUR:
 			return start_dt + datetime.timedelta(hours=count) >= end_dt
 		elif period == Constants.FOUR_HOURS:
