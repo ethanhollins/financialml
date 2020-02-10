@@ -276,47 +276,47 @@ print('Won: {} Lost: {}'.format(won, lost))
 print('Success rate: {:.2%}'.format(won/(won+lost)))
 cell_timer.kill()
 
-def get_feature_importance(model, X_train_dataset, feature_names):
-	pred_x = model.predict(X_train_dataset)
+# def get_feature_importance(model, X_train_dataset, feature_names):
+# 	pred_x = model.predict(X_train_dataset)
 
-	random_ind = np.random.choice(X_train.shape[0], 1000, replace=False)
-	data = X_train[random_ind[:500]]
-	e = shap.DeepExplainer(model, data)
-	test1 = X_train[random_ind[500:1000]]
-	shap_val = e.shap_values(test1)
-	shap_val = np.array(shap_val)
-	shap_val = np.reshape(shap_val, (int(shap_val.shape[1]), int(shap_val.shape[2]), int(shap_val.shape[3])))
-	shap_abs = np.absolute(shap_val)
-	sum_0 = np.sum(shap_abs, axis=0)
-	x_pos = [i for i, _ in enumerate(f_names)]
+# 	random_ind = np.random.choice(X_train.shape[0], 1000, replace=False)
+# 	data = X_train[random_ind[:500]]
+# 	e = shap.DeepExplainer(model, data)
+# 	test1 = X_train[random_ind[500:1000]]
+# 	shap_val = e.shap_values(test1)
+# 	shap_val = np.array(shap_val)
+# 	shap_val = np.reshape(shap_val, (int(shap_val.shape[1]), int(shap_val.shape[2]), int(shap_val.shape[3])))
+# 	shap_abs = np.absolute(shap_val)
+# 	sum_0 = np.sum(shap_abs, axis=0)
+# 	x_pos = [i for i, _ in enumerate(f_names)]
 
-	plt.figure(figsize=(10,6))
+# 	plt.figure(figsize=(10,6))
 
-	plt1 = plt.subplot(4,1,1)
-	plt1.barh(x_pos, sum_0[2])
-	plt1.set_yticks(x_pos)
-	plt1.set_yticklabels(feature_names)
-	plt1.set_title('features of last candle')
+# 	plt1 = plt.subplot(4,1,1)
+# 	plt1.barh(x_pos, sum_0[2])
+# 	plt1.set_yticks(x_pos)
+# 	plt1.set_yticklabels(feature_names)
+# 	plt1.set_title('features of last candle')
 
-	plt2 = plt.subplot(4,1,2,sharex=plt1)
-	plt2.barh(x_pos, sum_0[1])
-	plt2.set_yticks(x_pos)
-	plt2.set_yticklabels(feature_names)
-	plt2.set_title('features of last candle -1')
+# 	plt2 = plt.subplot(4,1,2,sharex=plt1)
+# 	plt2.barh(x_pos, sum_0[1])
+# 	plt2.set_yticks(x_pos)
+# 	plt2.set_yticklabels(feature_names)
+# 	plt2.set_title('features of last candle -1')
 
-	plt3 = plt.subplot(4,1,3, sharex=plt1)
-	plt3.barh(x_pos, sum_0[0])
-	plt3.set_yticks(x_pos)
-	plt3.set_ytickslabels(feature_names)
-	plt3.set_title('features of last candle -2')
+# 	plt3 = plt.subplot(4,1,3, sharex=plt1)
+# 	plt3.barh(x_pos, sum_0[0])
+# 	plt3.set_yticks(x_pos)
+# 	plt3.set_ytickslabels(feature_names)
+# 	plt3.set_title('features of last candle -2')
 
-	plt.tight_layout()
-	plt.show()
+# 	plt.tight_layout()
+# 	plt.show()
 
-cell_timer = MeasureTime()
-features_list = ['candle type', 'wicks up', 'wicks down', 'body size']
-get_feature_importance(model, X_train, features_list)
-cell_timer.kill()
+# cell_timer = MeasureTime()
+# features_list = ['candle type', 'wicks up', 'wicks down', 'body size']
+# get_feature_importance(model, X_train, features_list)
+# cell_timer.kill()
 
 
 
