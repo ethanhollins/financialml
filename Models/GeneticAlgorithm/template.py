@@ -32,7 +32,7 @@ print(df.shape)
 Build Genetic Algorithm model
 '''
 
-def SimpleBuySellEvaluator(object):
+class SimpleBuySellEvaluator(object):
 
 	def __init__(threshold=0.5):
 		self.threshold = threshold
