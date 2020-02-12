@@ -10,6 +10,7 @@ class DataLoader(object):
 
 	def __init__(self, source='oanda'):
 		self._source = source
+		self._root = self._getRootPath()
 		self._getOptions()
 		if self._source == 'oanda':
 			self._headers = {
@@ -22,17 +23,28 @@ class DataLoader(object):
 			)
 		else:
 			raise Exception('Data source not found.')
+	
+	def _getRootPath(self):
+		root = ''
+		attempts = 5
+		for i in range(attempts):
+			if os.path.isfile(os.path.join(root, "DataLoader.py")):
+				return root
+			root += '../'
+
+		raise Exception('Cannot find root path.')
 
 	def _getOptions(self):
-		if os.path.exists('options.json'):
-			with open('options.json', 'r') as f:
+		path = os.path.join(self._root, 'options.json')
+		if os.path.exists(path):
+			with open(path, 'r') as f:
 				self._options = json.load(f)[self._source]
 				
 		else:
 			raise Exception('Options file does not exist.')
 
 	def get(self, product, period, start=None, end=None, current=False, override=False):
-		data_path = os.path.join('data/', '{}/{}'.format(product, period))
+		data_path = os.path.join(self._root, 'data/', '{}/{}'.format(product, period))
 		if os.path.exists(data_path) and len(os.listdir(data_path)) > 0 and not override:
 			data = self.load(product, period, start, end)
 			if current:
@@ -59,7 +71,7 @@ class DataLoader(object):
 		if not end:
 			end = datetime.datetime.now()
 
-		data_dir = os.path.join('data/', '{}/{}/'.format(product, period))
+		data_dir = os.path.join(self._root, 'data/', '{}/{}/'.format(product, period))
 		frags = []
 		for y in range(start.year, end.year+1):
 			data_path = os.path.join(data_dir, '{}-{}.csv'.format(y, y+1))
@@ -87,7 +99,7 @@ class DataLoader(object):
 			return data
 
 	def save(self, data, product, period, start, end):
-		data_dir = os.path.join('data/', '{}/{}/'.format(product, period))
+		data_dir = os.path.join(self._root, 'data/', '{}/{}/'.format(product, period))
 		if not os.path.exists(data_dir):
 			os.makedirs(data_dir)
 
