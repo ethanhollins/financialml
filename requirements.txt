@@ -1,4 +1,5 @@
 numpy
+numba
 pandas
 tensorflow-gpu
 matplotlib
