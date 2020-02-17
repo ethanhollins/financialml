@@ -140,6 +140,14 @@ class GeneticAlgorithm(object):
 		return
 
 '''
+Generic functions
+'''
+
+@jit
+def convertToPips(x):
+	return np.around(x * 1000, 2)
+
+'''
 GA Evaluators
 '''
 
@@ -221,6 +229,7 @@ class GenericCrossover(object):
 				result.append(new_model)
 		return result
 
+
 class PreserveBestCrossover(object):
 	def __init__(self, preserve_rate=0.2, crossover_func=generic_crossover):
 		self._preserve_rate = preserve_rate
@@ -287,6 +296,7 @@ class GenericMutation(object):
 			new_weights = self._mutate_func(weights, self._mutation_rate, self._mean, self._std)
 			model.setWeights(new_weights)
 
+
 class PreserveBestMutation(object):
 	def __init__(self, mutation_rate=0.01, mutate_func=generic_mutate):
 		self._mutation_rate = mutation_rate
@@ -328,5 +338,17 @@ def generic_lstm_model_generator(mean, std):
 	))
 	return model
 
+
+def generic_dense_model_generator(mean, std):
+	model = tf.keras.models.Sequential()
+	model.add(tf.keras.layers.Dense(
+		32, activation='relu',
+		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+	))
+	model.add(tf.keras.layers.Dense(
+		1, activation='sigmoid',
+		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+	))
+	return model
 
 
