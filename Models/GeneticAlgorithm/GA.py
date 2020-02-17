@@ -109,7 +109,7 @@ class GeneticAlgorithm(object):
 	def generateModels(self):
 		self._models = []
 		for i in range(self._num_models):
-			model = self._model_generator()
+			model = self._model_generator(self._mean, self._std)
 			self._models.append(GeneticAlgorithmModel(model, self._evaluator))
 		print('Models initialized.')
 
@@ -317,14 +317,14 @@ def generic_mutate(weights, mutation_rate, mean, std):
 
 ### Keras Model Generators
 
-def generic_lstm_model_generator():
+def generic_lstm_model_generator(mean, std):
 	model = tf.keras.models.Sequential()
 	model.add(tf.keras.layers.LSTM(
-		16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=np.mean(X), stddev=np.std(X))
+		16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
 	))
 	model.add(tf.keras.layers.Dense(
 		1, activation='sigmoid',
-		kernel_initializer=tf.keras.initializers.RandomNormal(mean=np.mean(X), stddev=np.std(X))
+		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
 	))
 	return model
 
