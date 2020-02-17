@@ -9,7 +9,6 @@ Created by: Ethan Hollins
 
 from DataLoader import DataLoader
 from numba import jit
-from sklearn.preprocessing import MinMaxScaler
 import Constants
 import datetime as dt
 import tensorflow as tf
@@ -32,7 +31,7 @@ Data Preprocessing
 
 # Load GBPUSD ohlc data
 dl = DataLoader()
-df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2017,1,1))
+df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2015,1,1))
 df = df[['bid_close']]
 
 print(df.head(5))
