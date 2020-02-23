@@ -13,7 +13,7 @@ Generic functions
 
 @jit
 def convertToPips(x):
-	return np.around(x * 1000, 2)
+	return np.around(x * 10000, 2)
 
 '''
 GA Optimizers
@@ -54,7 +54,6 @@ class GenericCrossover(object):
 	def build(survival_rate, num_models, data_shape):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
-		self._data_shape = data_shape
 
 	def __call__(self, models):
 		models = [i for i in models[0]]
@@ -72,7 +71,9 @@ class GenericCrossover(object):
 				)
 
 				new_model = models[i].newModel()
-				gen_model = new_model.generateModel(0,1)
+				gen_model = new_model.generateModel(
+					models[i].getModelInfo()
+				)
 				new_model.setModel(gen_model)
 				new_model.setWeights(new_weights)
 
@@ -91,7 +92,6 @@ class PreserveBestCrossover(object):
 	def build(self, survival_rate, num_models, data_shape):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
-		self._data_shape = data_shape
 
 	def __call__(self, models):
 		fitness = [i[0] for i in models[1]]
@@ -112,7 +112,10 @@ class PreserveBestCrossover(object):
 				)
 
 				new_model = models[i].newModel()
-				gen_model = new_model.generateModel(0,1)
+				new_model.setModelInfo(models[i].getModelInfo())
+				gen_model = new_model.generateModel(
+					new_model.getModelInfo()
+				)
 				new_model.setModel(gen_model)
 				new_model.setWeights(new_weights)
 
@@ -208,17 +211,22 @@ class GeneticAlgorithmModel(object):
 
 	def __call__(self, X, y, training=False):
 		if not self._model:
-			self._model = self.generateModel(np.mean(X), np.std(X))
+			self._model_info = [
+				np.mean(X), np.std(X),
+				X.shape
+			]
+			self._model = self.generateModel(self.getModelInfo())
 
-	def generateModel(self, mean, std):
+	def generateModel(self, model_info):
 		model = tf.keras.models.Sequential()
 		model.add(tf.keras.layers.LSTM(
-			16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+			16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=model_info[0], stddev=model_info[1])
 		))
 		model.add(tf.keras.layers.Dense(
 			1, activation='sigmoid',
-			kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+			kernel_initializer=tf.keras.initializers.RandomNormal(mean=model_info[0], stddev=model_info[1])
 		))
+		model.build(input_shape=model_info[2])
 		return model
 
 	def getModel(self):
@@ -226,6 +234,12 @@ class GeneticAlgorithmModel(object):
 
 	def setModel(self, model):
 		self._model = model
+
+	def getModelInfo(self):
+		return self._model_info
+
+	def setModelInfo(self, model_info):
+		self._model_info = model_info
 
 	def getWeights(self):
 		return self._model.get_weights()
@@ -245,6 +259,9 @@ class SimplePipReturnModel(GeneticAlgorithmModel):
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y, training)
 		return SimplePipReturnModel.run(y, self._model(X).numpy(), self._threshold)
+
+	def newModel(self):
+		return SimplePipReturnModel(self._threshold)
 
 	@jit
 	def run(y, out, threshold):

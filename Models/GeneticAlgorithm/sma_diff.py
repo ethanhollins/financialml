@@ -22,7 +22,7 @@ df = df[['bid_close']]
 # Feature Engineering
 @jit
 def convertToPips(x):
-	return np.around(x * 1000, 2)
+	return np.around(x * 10000, 2)
 
 # Produce SMA train data
 @jit
@@ -80,7 +80,7 @@ def generate_models(num_models):
 		models.append(GA.SimplePipReturnModel())
 	return models
 
-num_models = 100
+num_models = 50
 ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train, y_train),

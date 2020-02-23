@@ -148,7 +148,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		super().__call__(X, y)
 		return GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp)
 
-	def generateModel(self, mean, std):
+	def generateModel(self, model_info):
 		return BasicDenseModel(2, [16, 16, 2])
 
 	def newModel(self):

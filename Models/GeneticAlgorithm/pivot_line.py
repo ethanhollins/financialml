@@ -43,7 +43,7 @@ Feature Engineering
 
 # Convert price to pips
 def convertToPips(x):
-	return np.around(x * 1000, 2)
+	return np.around(x * 10000, 2)
 
 @jit
 def getRsiData(close, period):
