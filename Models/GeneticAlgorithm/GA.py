@@ -360,7 +360,7 @@ class GeneticAlgorithm(object):
 			batch = []
 			for j in range(len(self._train_data[0])):
 				batch.append(
-					mod(self._train_data[0][j], self._train_data[1][j])
+					mod(self._train_data[0][j], self._train_data[1][j], training=True)
 				)
 			train_fit.append(batch)
 
@@ -393,6 +393,7 @@ class GeneticAlgorithm(object):
 	def select(self, fit):
 		fit_scaled = (fit - fit.min()) / (fit.max() - fit.min())
 		fit_sorted = sorted(enumerate(fit_scaled), key=lambda x: x[1], reverse=True)
+
 		fit_selected = []
 		selected = []
 		idx = 0
@@ -402,6 +403,7 @@ class GeneticAlgorithm(object):
 				fit_selected.append((i,v))
 				selected.append(self._models[i])
 			idx+=1
+
 		return selected, [i[1] for i in fit_selected]
 
 	def optimize(self, fit):
@@ -435,9 +437,12 @@ class GeneticAlgorithm(object):
 		))
 		
 		if len(val_fit) > 0:
-			print(' Val   | Best: {:.2f}\tMedian: {:.2f}'.format(
+			print(' Val   | Best: {:.2f}\tMedian: {:.2f}\n'.format(
 				val_best, val_median
 			))
+
+		for i in sorted(enumerate(train_arr), key=lambda x: x[1], reverse=True)[:5]:
+			print(self._models[i[0]])
 
 	def load(self):
 		return

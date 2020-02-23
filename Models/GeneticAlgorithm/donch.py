@@ -146,7 +146,19 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
-		return GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp)
+		results = GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp)
+		if training:
+			self.results = results
+		return self.getPerformance(*results)
+
+	def getPerformance(self, result, dd, gain, loss):
+		p_res = result / self.sl
+		p_dd = dd / self.sl
+		if loss == 0:
+			gpr = 0.0
+		else:
+			gpr = (gain / loss) + 1
+		return (p_res * gpr) - pow(p_dd, 2)
 
 	def generateModel(self, model_info):
 		return BasicDenseModel(2, [16, 16, 2])
@@ -164,17 +176,33 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		self._model.W = [np.copy(i) for i in weights[:len(self._model.W)]]
 		self._model.b = [np.copy(i) for i in weights[len(self._model.W):]]
 
+	def __str__(self):
+		return ' Perf: {:.2f}\n % Ret: {:.2f}%, % DD: {:.2f}%\n Gain: {:.2f}%, Loss: {:.2f}%, GPR: {:.2f}\n'.format(
+			self.getPerformance(*self.results),
+			(self.results[0] / self.sl),
+			(self.results[1] / self.sl),
+			(self.results[2] / self.sl),
+			(self.results[3] / self.sl),
+			(self.results[2] / self.results[3]) if self.results[3] != 0 else 0
+		)
+
 	@jit
 	def run(out, y, threshold, sl, tp):
 		pos_open = 0
 		pos_dir = 0
 		result = 0.0
 
+		max_ret = 0.0
+		dd = 0.0
+		gain = 0.0
+		loss = 0.0
+
 		for i in range(out.shape[0]):
 
 			if pos_open != 0:
 				if pos_dir == 1:
 					if convertToPips(y[i][1] - pos_open) <= -sl:
+						loss += sl
 						result = result - sl
 						pos_open = 0
 						
@@ -183,6 +211,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 					# 	pos_open = 0
 				else:
 					if convertToPips(pos_open - y[i][0]) <= -sl:
+						loss += sl
 						result = result - sl
 						pos_open = 0
 
@@ -193,17 +222,32 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if out[i][1] > threshold:
 				if pos_open == 0 or pos_dir != 1:
 					if pos_open != 0:
-						result = result + convertToPips(pos_open - y[i][2])
+						ret = convertToPips(pos_open - y[i][2])
+						if ret >= 0:
+							gain += ret
+						else:
+							loss += abs(ret)
+						result += ret
 					pos_open = y[i][2]
 					pos_dir = 1
 			if out[i][0] < threshold:
 				if pos_open == 0 or pos_dir != 0:
 					if pos_open != 0:
-						result = result + convertToPips(y[i][2] - pos_open)
+						ret = convertToPips(y[i][2] - pos_open)
+						if ret >= 0:
+							gain += ret
+						else:
+							loss += abs(ret)
+						result += ret
 					pos_open = y[i][2]
 					pos_dir = 0
 
-		return result
+			if result > max_ret:
+				max_ret = result
+			elif (max_ret - result) > dd:
+				dd = (max_ret - result)
+
+		return [result, dd, gain, loss]
 
 # Test Dense Model
 bdm = BasicDenseModel(2, [16, 16, 2])
