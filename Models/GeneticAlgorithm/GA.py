@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import math
 import sys
+import time
 
 tf.keras.backend.set_floatx('float64')
 
@@ -15,50 +16,6 @@ def convertToPips(x):
 	return np.around(x * 1000, 2)
 
 '''
-GA Evaluators
-'''
-
-class SimplePipReturnEvaluator(object):
-
-	def __init__(self, threshold=0.5):
-		self.threshold = threshold
-
-	def __call__(self, y, out):
-		return SimplePipReturnEvaluator.run(y, out.numpy(), self.threshold)
-
-	@jit
-	def run(y, out, threshold):
-		result = 0.0
-		c_dir = -1
-		last_dir = -1
-		last_entry = 0.0
-
-		for i in range(out.shape[0]):
-			c_out = out[i][0]
-
-			if c_out > (1.0 - threshold):
-				c_dir = 1
-			elif c_out < threshold:
-				c_dir = 0
-			else:
-				c_dir = -1
-
-			if c_dir != -1:
-				if last_dir != -1:
-					if last_dir != c_dir:
-						if last_dir == 1:
-							result += (y[i] - last_entry)
-						else:
-							result += (last_entry - y[i])
-						last_dir = c_dir
-						last_entry = y[i]
-				else:
-					last_dir = c_dir
-					last_entry = y[i]
-
-		return convertToPips(result)
-
-'''
 GA Optimizers
 '''
 
@@ -66,9 +23,26 @@ GA Optimizers
 
 def generic_crossover(x, y):
 	for i in range(len(x)):
-		for j in range(x[i].shape[0]):
-			if np.random.uniform() >= 0.5:
-				x[i][j] = y[i][j]
+		if type(x[i]) == np.ndarray:
+			x[i] = generic_crossover(x[i], y[i])
+		else:
+			if np.random.random() >= 0.5:
+				x[i] = y[i]
+	return x
+
+def perfect_crossover(x, y):
+	for i in range(len(x)):
+		if len(x[i].shape) == 1:
+			idx = np.random.choice(x[i].size, size=int(x[i].size/2)+1)
+			x[i][idx] = y[i][idx]
+		else:
+			x[i] = perfect_crossover(x[i], y[i])
+	return x
+
+def layer_crossover(x, y):
+	idx = np.random.choice(len(x), size=int(len(x)/2)+1)
+	for i in idx:
+		x[i] = y[i]
 	return x
 
 ### Crossover optimizers
@@ -77,10 +51,9 @@ class GenericCrossover(object):
 	def __init__(self, crossover_func=generic_crossover):
 		self._crossover_func = crossover_func
 
-	def build(survival_rate, num_models, evaluator, data_shape):
+	def build(survival_rate, num_models, data_shape):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
-		self._evaluator = evaluator
 		self._data_shape = data_shape
 
 	def __call__(self, models):
@@ -91,15 +64,16 @@ class GenericCrossover(object):
 		for i in indices:
 			mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
 			for m in mates:
-				new_weights = self._crossover_func(
-					[i.numpy() for i in models[i].getModel().weights], 
-					[i.numpy() for i in models[m].getModel().weights]
-				)
-				
-				clone_keras = tf.keras.models.clone_model(models[i].getModel())
-				clone_keras.build(input_shape=self._data_shape)
+				i_weights = models[i].getModel().get_weights()
+				m_weights = models[m].getModel().get_weights()
 
-				new_model = GeneticAlgorithmModel(clone_keras, self._evaluator)
+				new_weights = self._crossover_func(
+					i_weights, m_weights
+				)
+
+				new_model = models[i].newModel()
+				gen_model = new_model.generateModel(0,1)
+				new_model.setModel(gen_model)
 				new_model.setWeights(new_weights)
 
 				result.append(new_model)
@@ -114,10 +88,9 @@ class PreserveBestCrossover(object):
 		self._crossover_func = crossover_func
 		assert 0.0 <= self._preserve_rate <= 1.0
 
-	def build(self, survival_rate, num_models, evaluator, data_shape):
+	def build(self, survival_rate, num_models, data_shape):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
-		self._evaluator = evaluator
 		self._data_shape = data_shape
 
 	def __call__(self, models):
@@ -131,15 +104,16 @@ class PreserveBestCrossover(object):
 		while len(result) < self._num_models:
 			mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
 			for m in mates:
-				new_weights = self._crossover_func(
-					[i.numpy() for i in models[i].getModel().weights], 
-					[i.numpy() for i in models[m].getModel().weights]
-				)
-				
-				clone_keras = tf.keras.models.clone_model(models[i].getModel())
-				clone_keras.build(input_shape=self._data_shape)
+				i_weights = models[i].getWeights()
+				m_weights = models[m].getWeights()
 
-				new_model = GeneticAlgorithmModel(clone_keras, self._evaluator)
+				new_weights = self._crossover_func(
+					i_weights, m_weights
+				)
+
+				new_model = models[i].newModel()
+				gen_model = new_model.generateModel(0,1)
+				new_model.setModel(gen_model)
 				new_model.setWeights(new_weights)
 
 				result.append(new_model)
@@ -173,7 +147,7 @@ class GenericMutation(object):
 
 	def __call__(self, models):
 		for model in models:
-			weights = [i.numpy() for i in model.getWeights()]
+			weights = model.getWeights()
 			new_weights = self._mutate_func(weights, self._mutation_rate, self._mean, self._std)
 			model.setWeights(new_weights)
 
@@ -192,7 +166,7 @@ class PreserveBestMutation(object):
 	def __call__(self, models):
 		l = int(len(models)*self._survival_rate)
 		for model in models[int(l*self._preserve_rate):]:
-			weights = [i.numpy() for i in model.getWeights()]
+			weights = model.getWeights()
 			new_weights = self._mutate_func(weights, self._mutation_rate, self._mean, self._std)
 			model.setWeights(new_weights)
 
@@ -229,12 +203,23 @@ Genetic Algorithm Model
 
 class GeneticAlgorithmModel(object):
 
-	def __init__(self, model, evaluator):
-		self._model = model
-		self._evaluator = evaluator
+	def __init__(self):
+		self._model = None
 
 	def __call__(self, X, y, training=False):
-		return self._evaluator(y, self._model(X))
+		if not self._model:
+			self._model = self.generateModel(np.mean(X), np.std(X))
+
+	def generateModel(self, mean, std):
+		model = tf.keras.models.Sequential()
+		model.add(tf.keras.layers.LSTM(
+			16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+		))
+		model.add(tf.keras.layers.Dense(
+			1, activation='sigmoid',
+			kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
+		))
+		return model
 
 	def getModel(self):
 		return self._model
@@ -243,10 +228,55 @@ class GeneticAlgorithmModel(object):
 		self._model = model
 
 	def getWeights(self):
-		return self._model.weights
+		return self._model.get_weights()
 
 	def setWeights(self, weights):
 		self._model.set_weights(weights)
+
+	def newModel(self):
+		return GeneticAlgorithmModel()
+
+class SimplePipReturnModel(GeneticAlgorithmModel):
+
+	def __init__(self, threshold=0.5):
+		super().__init__()
+		self._threshold = threshold
+
+	def __call__(self, X, y, training=False):
+		super().__call__(X, y, training)
+		return SimplePipReturnModel.run(y, self._model(X).numpy(), self._threshold)
+
+	@jit
+	def run(y, out, threshold):
+		result = 0.0
+		c_dir = -1
+		last_dir = -1
+		last_entry = 0.0
+
+		for i in range(out.shape[0]):
+			c_out = out[i][0]
+
+			if c_out > (1.0 - threshold):
+				c_dir = 1
+			elif c_out < threshold:
+				c_dir = 0
+			else:
+				c_dir = -1
+
+			if c_dir != -1:
+				if last_dir != -1:
+					if last_dir != c_dir:
+						if last_dir == 1:
+							result += (y[i] - last_entry)
+						else:
+							result += (last_entry - y[i])
+						last_dir = c_dir
+						last_entry = y[i]
+				else:
+					last_dir = c_dir
+					last_entry = y[i]
+
+		return convertToPips(result)
 
 '''
 Genetic Algorithm Main Controller
@@ -256,21 +286,20 @@ class GeneticAlgorithm(object):
 	# TODO: Add optimizer functionality to performance selection process
 
 	def __init__(self, 
-		evaluator, crossover_opt, mutation_opt=None,
-		model_generator=generic_lstm_model_generator,
-		num_models=100, survival_rate=0.5
+		crossover_opt, mutation_opt=None,
+		survival_rate=0.5
 	):
-		self._evaluator = evaluator
 		self._crossover_opt = crossover_opt
 		self._mutation_opt = mutation_opt
-		self._model_generator = model_generator
-		self._num_models = num_models
 		self._survival_rate = survival_rate
 
 	def add(self, model):
 		self._models.append(model)
 
-	def fit(self, train_data, val_data=None, batch_size=0, generations=20, run=True):
+	def fit(self, models, train_data, val_data=None, batch_size=0, generations=20, run=True):
+		self._models = models
+		self._num_models = len(models)
+		
 		assert type(batch_size) == int
 		self._mean = np.mean(train_data[0])
 		self._std = np.std(train_data[0])
@@ -291,7 +320,6 @@ class GeneticAlgorithm(object):
 			self._val_data = None
 
 		self.build()
-		self.generateModels()
 
 		if run:
 			assert type(generations) == int
@@ -308,6 +336,7 @@ class GeneticAlgorithm(object):
 		val_fit = []
 
 		num_models = len(self._models)
+		start = time.time()
 		print()
 		for i in range(num_models):
 			mod = self._models[i]
@@ -322,32 +351,27 @@ class GeneticAlgorithm(object):
 				val_fit.append(mod(*self._val_data))
 
 			progress = int((i+1)/num_models * 20.0)
-			print('({}) Progress: [{}{}] - {}/{}'.format(
+			print('({}) Progress: [{}{}] - {}/{} '.format(
 				gen+1,
-				'='*(progress-1)+'>' if progress > 0 else '', 
-				' '*int(20-progress), 
+				'='*(progress), 
+				('>' if 20-progress > 0 else '')+(' '*int(20-progress-1)), 
 				i+1, num_models
-			), end='\r', flush=True)
+			), end='' if i == num_models-1 else '\r', flush=True)
 
-		print()
+		print('{:.2f}s'.format(
+			time.time() - start
+		))
 		return train_fit, val_fit
 	
 	def build(self):
 		self._crossover_opt.build(
 			self._survival_rate, self._num_models,
-			self._evaluator, self._train_data[0][0].shape
+			self._train_data[0][0].shape
 		)
 
 		self._mutation_opt.build(
 			self._survival_rate, self._mean, self._std
 		)
-
-	def generateModels(self):
-		self._models = []
-		for i in range(self._num_models):
-			model = self._model_generator(self._mean, self._std)
-			self._models.append(GeneticAlgorithmModel(model, self._evaluator))
-		print('Models initialized.')
 
 	def select(self, fit):
 		fit_scaled = (fit - fit.min()) / (fit.max() - fit.min())
@@ -364,25 +388,39 @@ class GeneticAlgorithm(object):
 		return selected, [i[1] for i in fit_selected]
 
 	def optimize(self, fit):
-		print(' Performing Selection...')
+		start = time.time()
+		print(' Performing Selection...', end='\r', flush=True)
 		selected = self.select(fit)
-		print(' Performing Crossover...')
+		print(' Performing Selection... {:.2f}s'.format(time.time() - start))
+		
+		start = time.time()
+		print(' Performing Crossover...', end='\r', flush=True)
 		self._models = self._crossover_opt(selected)
+		print(' Performing Crossover... {:.2f}s'.format(time.time() - start))
+
 		if self._mutation_opt:
-			print(' Performing Mutation...')
+			start = time.time()
+			print(' Performing Mutation...', end='\r', flush=True)
 			self._mutation_opt(self._models)
+			print(' Performing Mutation... {:.2f}s'.format(time.time() - start))
 
 	def report(self, gen, train_fit, val_fit):
 		train_arr = np.array(train_fit)[:,0]
 		train_best = np.amax(train_arr)
 		train_median = np.sort(train_arr)[::-1][int(len(train_arr)/2)]
 
-		val_best = np.amax(val_fit)
-		val_median = np.sort(val_fit)[::-1][int(len(val_fit)/2)]
+		if len(val_fit) > 0:
+			val_best = np.amax(val_fit)
+			val_median = np.sort(val_fit)[::-1][int(len(val_fit)/2)]
 
-		print('\n Train | Best: {:.2f} Median: {:.2f}\n Val   | Best: {:.2f} Median: {:.2f}'.format(
-			train_best, train_median, val_best, val_median
+		print('\n Train | Best: {:.2f}\tMedian: {:.2f}'.format(
+			train_best, train_median
 		))
+		
+		if len(val_fit) > 0:
+			print(' Val   | Best: {:.2f}\tMedian: {:.2f}'.format(
+				val_best, val_median
+			))
 
 	def load(self):
 		return

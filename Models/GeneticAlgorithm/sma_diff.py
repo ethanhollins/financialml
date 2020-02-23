@@ -16,8 +16,8 @@ class timeit(object):
 # Retrieve data
 
 dl = DataLoader()
-df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2015,1,1))
-df = df[['bid_close']]	
+df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2015,1,1))
+df = df[['bid_close']]
 
 # Feature Engineering
 @jit
@@ -67,18 +67,25 @@ y_val = y[train_size:]
 
 # Create Genetic Algorithm
 
-evaluator = GA.SimplePipReturnEvaluator(threshold=0.4)
 crossover = GA.PreserveBestCrossover(preserve_rate=1.0)
-mutation = GA.PreserveBestMutation(preserve_rate=1.0)
+mutation = GA.PreserveBestMutation(mutation_rate=0.05, preserve_rate=1.0)
 ga = GA.GeneticAlgorithm(
-	evaluator, crossover, mutation,
-	num_models=100, 
+	crossover, mutation,
 	survival_rate=0.2
 )
 
+def generate_models(num_models):
+	models = []
+	for i in range(num_models):
+		models.append(GA.SimplePipReturnModel())
+	return models
+
+num_models = 100
 ga.fit(
+	models=generate_models(num_models),
 	train_data=(X_train, y_train),
-	val_data=(X_val, y_val)
+	val_data=(X_val, y_val),
+	generations=20
 )
 
 
