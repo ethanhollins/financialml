@@ -128,8 +128,7 @@ class BasicDenseModel(object):
 			)
 
 	def __call__(self, inpt):
-		x = np.matmul(inpt, self.W[0])
-		x = tf.nn.relu(x)
+		x = np.matmul(inpt, self.W[0]) + self.b[0]
 		for i in range(1, len(self.W)):
 			x = tf.nn.relu(x)		
 			x = np.matmul(x, self.W[i]) + self.b[i]

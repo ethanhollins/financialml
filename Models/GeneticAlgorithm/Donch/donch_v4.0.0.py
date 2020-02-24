@@ -128,8 +128,7 @@ class BasicDenseModel(object):
 			)
 
 	def __call__(self, inpt):
-		x = np.matmul(inpt, self.W[0])
-		x = tf.nn.relu(x)
+		x = np.matmul(inpt, self.W[0]) + self.b[0]
 		for i in range(1, len(self.W)):
 			x = tf.nn.relu(x)		
 			x = np.matmul(x, self.W[i]) + self.b[i]
@@ -149,7 +148,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
-		results = GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp)
+		results = GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp, 2)
 		if training:
 			self.train_results = results
 		else:
@@ -193,9 +192,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		)
 
 	@jit
-	def run(out, y, threshold, sl, tp):
-		pos_open = 0
-		pos_dir = 0
+	def run(out, y, threshold, sl, tp, max_pos):
+		pos_open = np.zeros((2,), dtype=np.float32)
+		pos_dir = np.zeros((2,), dtype=np.float32)
 		result = 0.0
 
 		max_ret = 0.0
@@ -205,48 +204,67 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 		for i in range(out.shape[0]):
 
-			if pos_open != 0:
-				if pos_dir == 1:
-					if convertToPips(y[i][1] - pos_open) <= -sl:
-						loss += sl
-						result = result - sl
-						pos_open = 0
-						
-					# elif convertToPips(y[i][0] - pos_open) >= tp:
-					# 	result = result + tp
-					# 	pos_open = 0
+			if len(pos_open) != 0:
+				if pos_dir[-1] == 1:
+					for i in range(pos_open.size):
+						o = pos_open[i]
+						if o != 0:
+							if convertToPips(y[i][1] - o) <= -sl:
+								loss += sl
+								result = result - sl
+								del pos_open[i]
+							
+						# elif convertToPips(y[i][0] - pos_open) >= tp:
+						# 	result = result + tp
+						# 	pos_open = 0
 				else:
-					if convertToPips(pos_open - y[i][0]) <= -sl:
-						loss += sl
-						result = result - sl
-						pos_open = 0
+					for i in range(pos_open.size):
+						o = pos_open[i]
+						if o != 0.:
+							if convertToPips(o - y[i][0]) <= -sl:
+								loss += sl
+								result = result - sl
+								del pos_open[i]
 
-					# elif convertToPips(pos_open - y[i][1]) >= tp:
-					# 	result = result + tp
-					# 	pos_open = 0
+						# elif convertToPips(pos_open - y[i][1]) >= tp:
+						# 	result = result + tp
+						# 	pos_open = 0
 
 			if out[i][1] > threshold:
-				if pos_open == 0 or pos_dir != 1:
-					if pos_open != 0:
-						ret = convertToPips(pos_open - y[i][2])
+				if len(pos_open) == 0 or pos_dir[-1] != 1 or (pos_dir[-1] == 1 and len(pos_dir) < max_pos):
+					if len(pos_open) != 0 and pos_dir[-1] != 1:
+						ret = 0.
+						for o in pos_open:
+							if o != 0.:
+								ret += convertToPips(o - y[i][2])
 						if ret >= 0:
 							gain += ret
 						else:
 							loss += abs(ret)
 						result += ret
-					pos_open = y[i][2]
-					pos_dir = 1
+						pos_open = []
+						pos_dir = []
+						
+					pos_open.append(y[i][2])
+					pos_dir.append(1)
+
 			if out[i][0] < threshold:
-				if pos_open == 0 or pos_dir != 0:
-					if pos_open != 0:
-						ret = convertToPips(y[i][2] - pos_open)
+				if len(pos_open) == 0 or pos_dir[-1] != 0 or (pos_dir[-1] == 0 and len(pos_dir) < max_pos):
+					if len(pos_open) != 0 and pos_dir[-1] != 0:
+						ret = 0.
+						for o in pos_open:
+							if o != 0.:
+								ret += convertToPips(y[i][2] - o)
 						if ret >= 0:
 							gain += ret
 						else:
 							loss += abs(ret)
 						result += ret
-					pos_open = y[i][2]
-					pos_dir = 0
+						pos_open = np.zeros((2,))
+						pos_dir = np.zeros((2,))
+
+					pos_open.append(y[i][2])
+					pos_dir.append(0)
 
 			if result > max_ret:
 				max_ret = result

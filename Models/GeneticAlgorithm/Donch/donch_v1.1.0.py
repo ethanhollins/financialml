@@ -11,6 +11,8 @@ import time
 import pandas as pd
 import tensorflow as tf
 
+
+
 class timeit(object):
 	def __init__(self):
 		self.start = time.time()
@@ -25,7 +27,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2017,1,1))
+df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2017,1,1))
 df = df[['bid_high', 'bid_low', 'bid_close']]
 
 # Visualize data

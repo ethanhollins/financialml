@@ -11,6 +11,8 @@ import time
 import pandas as pd
 import tensorflow as tf
 
+
+
 class timeit(object):
 	def __init__(self):
 		self.start = time.time()
@@ -38,14 +40,13 @@ Feature Engineering
 '''
 
 # Get donchian data
-def getDonchUpDown(high, low, period):
+def getDonchUpDown(high, low, period, lookup):
 	X = []
 	last_high = 0
 	last_low = 0
-	for i in range(period, high.shape[0]):
+	for i in range(period+lookup, high.shape[0]):
 		c_high = 0.
 		c_low = 0.
-
 		for j in range(i-period, i):
 			if c_high == 0 or high[j] > c_high:
 				c_high = high[j]
@@ -53,7 +54,11 @@ def getDonchUpDown(high, low, period):
 				c_low = low[j]
 
 		if last_high != 0 and last_low != 0:
-			x = []
+			if len(X) > 0:
+				x = X[-1][-(lookup-1)*2:]
+			else:
+				x = []
+
 			if c_high > last_high:
 				x.append(1)
 			elif c_high == last_high:
@@ -71,23 +76,24 @@ def getDonchUpDown(high, low, period):
 			X.append(x)
 		last_high = c_high
 		last_low = c_low
-
-	return np.array(X)
+	return np.array(X[lookup:], dtype=np.float32)
 
 period = 4
+lookup = 4
 timer = timeit()
 train_data = getDonchUpDown(
 	df.values[:,0],
 	df.values[:,1],
-	period
+	period, lookup
 )
 timer.end()
 
-print('Donch Data:\n%s'%train_data[-5:])
+print('Donch Data:\n%s'%train_data[:10])
 print(train_data.shape)
+print(train_data.dtype)
 
 train_size = int(df.shape[0] * 0.7)
-period_off = period+1
+period_off = period+1+(lookup*2)
 
 X_train = train_data[:train_size]
 y_train = df.values[period_off:train_size+period_off]
@@ -166,7 +172,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (p_res * gpr) - pow(p_dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [16, 16, 2])
+		return BasicDenseModel(lookup*2, [16, 16, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.sl, self.tp, self.threshold)

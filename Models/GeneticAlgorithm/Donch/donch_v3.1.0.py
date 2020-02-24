@@ -37,6 +37,14 @@ print()
 Feature Engineering
 '''
 
+# Convert price to pips
+@jit
+def convertToPips(x):
+	return np.around(x * 10000, 2)
+
+def normalize(x):
+	return (x - np.mean(x)) / np.std(x)
+
 # Get donchian data
 def getDonchUpDown(high, low, period):
 	X = []
@@ -74,12 +82,12 @@ def getDonchUpDown(high, low, period):
 
 	return np.array(X)
 
-period = 4
+donch_period = 4
 timer = timeit()
 train_data = getDonchUpDown(
 	df.values[:,0],
 	df.values[:,1],
-	period
+	donch_period
 )
 timer.end()
 
@@ -87,7 +95,7 @@ print('Donch Data:\n%s'%train_data[-5:])
 print(train_data.shape)
 
 train_size = int(df.shape[0] * 0.7)
-period_off = period+1
+period_off = donch_period+1
 
 X_train = train_data[:train_size]
 y_train = df.values[period_off:train_size+period_off]
@@ -102,54 +110,76 @@ Create Genetic Model
 '''
 
 class BasicDenseModel(object):
-	def __init__(self, in_size, layers):
-		self._layers = layers
-		self.W = []
-		self.b = []
-		
-		self.createWb(in_size)
+	def __init__(self, in_size1, layers1, in_size2, layers2):
+		self._layers1 = layers1
+		self.W1 = []
+		self.b1 = []
 
-	def createWb(self, in_size):
+		self._layers2 = layers2
+		self.W2 = []
+		self.b2 = []
+		
+		self.createWb1(in_size1)
+		self.createWb2(in_size2)
+
+	def createWb1(self, in_size):
 		# Input layer
-		self.W.append(
-			np.random.normal(size=(in_size, self._layers[0]))
+		self.W1.append(
+			np.random.normal(size=(in_size, self._layers1[0]))
 		)
-		self.b.append(
-			np.random.normal(size=(self._layers[0]))
+		self.b1.append(
+			np.random.normal(size=(self._layers1[0]))
 		)
 
 		# Hidden Layers
-		for i in range(1, len(self._layers)):
-			self.W.append(
-				np.random.normal(size=(self._layers[i-1], self._layers[i]))
+		for i in range(1, len(self._layers1)):
+			self.W1.append(
+				np.random.normal(size=(self._layers1[i-1], self._layers1[i]))
 			)
-			self.b.append(
-				np.random.normal(size=(self._layers[i]))
+			self.b1.append(
+				np.random.normal(size=(self._layers1[i]))
 			)
 
-	def __call__(self, inpt):
-		x = np.matmul(inpt, self.W[0])
-		x = tf.nn.relu(x)
-		for i in range(1, len(self.W)):
+	def createWb2(self, in_size):
+		# Input layer
+		self.W2.append(
+			np.random.normal(size=(in_size, self._layers2[0]))
+		)
+		self.b2.append(
+			np.random.normal(size=(self._layers2[0]))
+		)
+
+		# Hidden Layers
+		for i in range(1, len(self._layers2)):
+			self.W2.append(
+				np.random.normal(size=(self._layers2[i-1], self._layers2[i]))
+			)
+			self.b2.append(
+				np.random.normal(size=(self._layers2[i]))
+			)
+
+	def __call__(self, inpt1):
+		x = np.matmul(inpt1, self.W1[0]) + self.b1[0]
+		for i in range(1, len(self.W1)):
 			x = tf.nn.relu(x)		
-			x = np.matmul(x, self.W[i]) + self.b[i]
-		return tf.nn.sigmoid(x).numpy()
+			x = np.matmul(x, self.W1[i]) + self.b1[i]
 
-# Convert price to pips
-@jit
-def convertToPips(x):
-	return np.around(x * 10000, 2)
+		y = (self.W2[0] * ((25+250)/2)) + self.b2[0]
+		for i in range(1, len(self.W2)):
+			y = tf.nn.relu(y)		
+			y = np.matmul(y, self.W2[i]) + self.b2[i]
+
+		return [tf.nn.sigmoid(x).numpy(), np.clip(np.sum(y), 25, 250)]
 
 class GeneticPlanModel(GA.GeneticAlgorithmModel):
-	def __init__(self, sl, tp, threshold=0.5):
+	def __init__(self, threshold=0.5):
 		super().__init__()
-		self.sl = sl
-		self.tp = tp
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
-		results = GeneticPlanModel.run(self._model(X), y, self.threshold, self.sl, self.tp)
+		out = self._model(X)
+		results = GeneticPlanModel.run(out[0], out[1], y, self.threshold)
 		if training:
 			self.train_results = results
 		else:
@@ -157,43 +187,49 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return self.getPerformance(*results)
 
 	def getPerformance(self, result, dd, gain, loss):
-		p_res = result / self.sl
-		p_dd = dd / self.sl
 		if loss == 0:
-			gpr = 0.0
+			gpr = 0
 		else:
 			gpr = (gain / loss) + 1
-		return (p_res * gpr) - pow(p_dd, 2)
+		return (result * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [16, 16, 2])
+		return BasicDenseModel(2, [16, 16, 2], 1, [32, 1])
 
 	def newModel(self):
-		return GeneticPlanModel(self.sl, self.tp, self.threshold)
+		return GeneticPlanModel(self.threshold)
 
 	def getWeights(self):
 		return (
-			[np.copy(i) for i in self._model.W]
-			+ [np.copy(i) for i in self._model.b]
+			[np.copy(i) for i in self._model.W1]
+			+ [np.copy(i) for i in self._model.b1]
+			+ [np.copy(i) for i in self._model.W2]
+			+ [np.copy(i) for i in self._model.b2]
 		)
 
 	def setWeights(self, weights):
-		self._model.W = [np.copy(i) for i in weights[:len(self._model.W)]]
-		self._model.b = [np.copy(i) for i in weights[len(self._model.W):]]
+		off = 0
+		off += len(self._model.W1)
+		self._model.W1 = [np.copy(i) for i in weights[:off]]
+		self._model.b1 = [np.copy(i) for i in weights[off:off+len(self._model.b1)]]
+		off += len(self._model.b1)
+		self._model.W2 = [np.copy(i) for i in weights[off:off+len(self._model.W2)]]
+		off += len(self._model.W2)
+		self._model.b2 = [np.copy(i) for i in weights[off:]]
 
 	def __str__(self):
 		return  ' (Train) Perf: {:.2f}\t% Ret: {:.2f}%\t% DD: {:.2f}%\tGPR: {:.2f}\n' \
 				'   (Val) Perf: {:.2f}\t% Ret: {:.2f}%\t% DD: {:.2f}%\tGPR: {:.2f}\n'.format(
 			self.getPerformance(*self.train_results),
-			(self.train_results[0] / self.sl), (self.train_results[1] / self.sl),
+			self.train_results[0], self.train_results[1],
 			(self.train_results[2] / self.train_results[3]) if self.train_results[3] != 0 else 0,
 			self.getPerformance(*self.val_results),
-			(self.val_results[0] / self.sl), (self.val_results[1] / self.sl),
+			self.val_results[0], self.val_results[1],
 			(self.val_results[2] / self.val_results[3]) if self.val_results[3] != 0 else 0
 		)
 
 	@jit
-	def run(out, y, threshold, sl, tp):
+	def run(out1, out2, y, threshold):
 		pos_open = 0
 		pos_dir = 0
 		result = 0.0
@@ -203,32 +239,32 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		gain = 0.0
 		loss = 0.0
 
-		for i in range(out.shape[0]):
+		for i in range(out1.shape[0]):
 
 			if pos_open != 0:
 				if pos_dir == 1:
-					if convertToPips(y[i][1] - pos_open) <= -sl:
-						loss += sl
-						result = result - sl
+					if convertToPips(y[i][1] - pos_open) <= -out2:
+						loss += 1.0
+						result -= 1.0
 						pos_open = 0
-						
+
 					# elif convertToPips(y[i][0] - pos_open) >= tp:
 					# 	result = result + tp
 					# 	pos_open = 0
 				else:
-					if convertToPips(pos_open - y[i][0]) <= -sl:
-						loss += sl
-						result = result - sl
+					if convertToPips(pos_open - y[i][0]) <= -out2:
+						loss += 1.0
+						result -= 1.0
 						pos_open = 0
 
 					# elif convertToPips(pos_open - y[i][1]) >= tp:
 					# 	result = result + tp
 					# 	pos_open = 0
 
-			if out[i][1] > threshold:
+			if out1[i][1] > threshold:
 				if pos_open == 0 or pos_dir != 1:
 					if pos_open != 0:
-						ret = convertToPips(pos_open - y[i][2])
+						ret = convertToPips(pos_open - y[i][2])/out2
 						if ret >= 0:
 							gain += ret
 						else:
@@ -236,10 +272,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 						result += ret
 					pos_open = y[i][2]
 					pos_dir = 1
-			if out[i][0] < threshold:
+			if out1[i][0] < threshold:
 				if pos_open == 0 or pos_dir != 0:
 					if pos_open != 0:
-						ret = convertToPips(y[i][2] - pos_open)
+						ret = convertToPips(y[i][2] - pos_open)/out2
 						if ret >= 0:
 							gain += ret
 						else:
@@ -256,19 +292,17 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return [result, dd, gain, loss]
 
 # Test Dense Model
-bdm = BasicDenseModel(2, [16, 16, 2])
+bdm = BasicDenseModel(2, [16, 16, 2], 2, [16, 16, 1])
 
 print("Dense Model weights and biases:")
-print([i.shape for i in bdm.W])
-print([i.shape for i in bdm.b])
+print([i.shape for i in bdm.W1])
+print([i.shape for i in bdm.b1])
+print([i.shape for i in bdm.W2])
+print([i.shape for i in bdm.b2])
 
 print("Test Dense model:")
 
-for i in range(3):
-	bdm = BasicDenseModel(2, [32, 32, 2])
-	print(bdm(np.array([[-1,0],[1,1],[0,0]])))
-
-gpm = GeneticPlanModel(130., 1000.)
+gpm = GeneticPlanModel()
 
 print("\nTest Genetic Plan Model:")
 print(gpm(X_train, y_train))
@@ -287,7 +321,7 @@ ga = GA.GeneticAlgorithm(
 def generate_models(num_models):
 	models = []
 	for i in range(num_models):
-		models.append(GeneticPlanModel(130., None, threshold=0.4))
+		models.append(GeneticPlanModel(threshold=0.4))
 	return models
 
 num_models = 5000

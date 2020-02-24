@@ -51,7 +51,7 @@ class GenericCrossover(object):
 	def __init__(self, crossover_func=generic_crossover):
 		self._crossover_func = crossover_func
 
-	def build(survival_rate, num_models, data_shape):
+	def build(survival_rate, num_models):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
 
@@ -89,7 +89,7 @@ class PreserveBestCrossover(object):
 		self._crossover_func = crossover_func
 		assert 0.0 <= self._preserve_rate <= 1.0
 
-	def build(self, survival_rate, num_models, data_shape):
+	def build(self, survival_rate, num_models):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
 
@@ -211,10 +211,14 @@ class GeneticAlgorithmModel(object):
 
 	def __call__(self, X, y, training=False):
 		if not self._model:
-			self._model_info = [
-				np.mean(X), np.std(X),
-				X.shape
-			]
+			self._model_info = []
+			try:
+				self._model_info = [
+					np.mean(X), np.std(X),
+					X.shape
+				]
+			except:
+				pass
 			self._model = self.generateModel(self.getModelInfo())
 
 	def generateModel(self, model_info):
@@ -382,8 +386,7 @@ class GeneticAlgorithm(object):
 	
 	def build(self):
 		self._crossover_opt.build(
-			self._survival_rate, self._num_models,
-			self._train_data[0][0].shape
+			self._survival_rate, self._num_models
 		)
 
 		self._mutation_opt.build(

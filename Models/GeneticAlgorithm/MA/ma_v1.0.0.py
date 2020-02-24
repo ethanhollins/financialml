@@ -22,11 +22,10 @@ class timeit(object):
 '''
 Data Preprocessing
 '''
-
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2017,1,1))
-df = df[['bid_high', 'bid_low', 'bid_close']]
+df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2017,1,1))
+df = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']]
 
 # Visualize data
 print('\nH4:\n%s'%df.head(5))
@@ -36,66 +35,68 @@ print()
 '''
 Feature Engineering
 '''
+@jit
+def convertToPips(x):
+	return np.around(x * 10000, 2)
 
-# Get donchian data
-def getDonchUpDown(high, low, period):
+def normalize(x):
+	return (x - np.mean(x)) / np.std(x)
+
+def getCandlestickData(candle):
+	if candle[3] >= candle[0]:
+		return [
+			1, # Bullish
+			convertToPips(candle[1] - candle[3]), # Wick up
+			convertToPips(candle[2] - candle[0]), # Wick down
+			convertToPips(candle[3] - candle[0]) # Body size
+		]
+	else:
+		return [
+			0, # Bearish
+			convertToPips(candle[1] - candle[0]), # Wick up
+			convertToPips(candle[2] - candle[3]), # Wick down
+			convertToPips(candle[0] - candle[3]) # Body size
+		]
+
+def getTrainData(data, lookup):
 	X = []
-	last_high = 0
-	last_low = 0
-	for i in range(period, high.shape[0]):
-		c_high = 0.
-		c_low = 0.
+	for i in range(lookup, data.shape[0]):
+			temp_candlesticks = []
+			for j in range(i-lookup, i):
+				temp_candlesticks.append(
+					getCandlestickData(data[j])
+				)
 
-		for j in range(i-period, i):
-			if c_high == 0 or high[j] > c_high:
-				c_high = high[j]
-			if c_low == 0 or low[j] < c_low:
-				c_low = low[j]
-
-		if last_high != 0 and last_low != 0:
-			x = []
-			if c_high > last_high:
-				x.append(1)
-			elif c_high == last_high:
-				x.append(0)
-			elif c_high < last_high:
-				x.append(-1)
-
-			if c_low > last_low:
-				x.append(1)
-			elif c_low == last_low:
-				x.append(0)
-			elif c_low < last_low:
-				x.append(-1)
-
-			X.append(x)
-		last_high = c_high
-		last_low = c_low
-
+			X.append(temp_candlesticks)
 	return np.array(X)
 
-period = 4
+lookup = 5
 timer = timeit()
-train_data = getDonchUpDown(
-	df.values[:,0],
-	df.values[:,1],
-	period
+train_data = getTrainData(
+	df.values,
+	lookup
+)
+train_data[:,:,1:] = normalize(train_data[:,:,1:])
+train_data = train_data.reshape(
+	train_data.shape[0],
+	train_data.shape[1] * train_data.shape[2]
 )
 timer.end()
 
-print('Donch Data:\n%s'%train_data[-5:])
+print('Candlestick Data:\n%s'%train_data[-5:])
 print(train_data.shape)
 
 train_size = int(df.shape[0] * 0.7)
-period_off = period+1
 
 X_train = train_data[:train_size]
-y_train = df.values[period_off:train_size+period_off]
+y_train = df.values[lookup:train_size+lookup]
 X_val = train_data[train_size:]
-y_val = df.values[train_size+period_off:]
+y_val = df.values[train_size+lookup:]
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
+
+print(y_train[:5])
 
 '''
 Create Genetic Model
@@ -128,8 +129,7 @@ class BasicDenseModel(object):
 			)
 
 	def __call__(self, inpt):
-		x = np.matmul(inpt, self.W[0])
-		x = tf.nn.relu(x)
+		x = np.matmul(inpt, self.W[0]) + self.b[0]
 		for i in range(1, len(self.W)):
 			x = tf.nn.relu(x)		
 			x = np.matmul(x, self.W[i]) + self.b[i]
@@ -166,7 +166,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (p_res * gpr) - pow(p_dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [16, 16, 2])
+		return BasicDenseModel(X_train.shape[1], [16, 16, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.sl, self.tp, self.threshold)
@@ -207,7 +207,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 			if pos_open != 0:
 				if pos_dir == 1:
-					if convertToPips(y[i][1] - pos_open) <= -sl:
+					if convertToPips(y[i][2] - pos_open) <= -sl:
 						loss += sl
 						result = result - sl
 						pos_open = 0
@@ -216,7 +216,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 					# 	result = result + tp
 					# 	pos_open = 0
 				else:
-					if convertToPips(pos_open - y[i][0]) <= -sl:
+					if convertToPips(pos_open - y[i][1]) <= -sl:
 						loss += sl
 						result = result - sl
 						pos_open = 0
@@ -228,24 +228,24 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if out[i][1] > threshold:
 				if pos_open == 0 or pos_dir != 1:
 					if pos_open != 0:
-						ret = convertToPips(pos_open - y[i][2])
+						ret = convertToPips(pos_open - y[i][3])
 						if ret >= 0:
 							gain += ret
 						else:
 							loss += abs(ret)
 						result += ret
-					pos_open = y[i][2]
+					pos_open = y[i][3]
 					pos_dir = 1
 			if out[i][0] < threshold:
 				if pos_open == 0 or pos_dir != 0:
 					if pos_open != 0:
-						ret = convertToPips(y[i][2] - pos_open)
+						ret = convertToPips(y[i][3] - pos_open)
 						if ret >= 0:
 							gain += ret
 						else:
 							loss += abs(ret)
 						result += ret
-					pos_open = y[i][2]
+					pos_open = y[i][3]
 					pos_dir = 0
 
 			if result > max_ret:
