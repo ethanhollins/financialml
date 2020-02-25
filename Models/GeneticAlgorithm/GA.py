@@ -325,7 +325,7 @@ class GeneticAlgorithm(object):
 		self._mean = np.mean(train_data[0])
 		self._std = np.std(train_data[0])
 
-		train_data = (tf.convert_to_tensor(train_data[0]), tf.convert_to_tensor(train_data[1]))
+		train_data = (train_data[0], train_data[1])
 
 
 		if batch_size:
@@ -336,7 +336,7 @@ class GeneticAlgorithm(object):
 			self._train_data = ([train_data[0]], [train_data[1]])
 
 		if val_data:
-			self._val_data = (tf.convert_to_tensor(val_data[0]), tf.convert_to_tensor(val_data[1]))
+			self._val_data = (val_data[0], val_data[1])
 		else:
 			self._val_data = None
 
