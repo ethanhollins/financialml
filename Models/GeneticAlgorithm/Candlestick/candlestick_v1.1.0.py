@@ -44,45 +44,56 @@ def convertToPips(x):
 def normalize(x):
 	return (x - np.mean(x)) / np.std(x)
 
-# Produce SMA train data
-@jit
-def getSmaDiff(data, periods, lookup):
+def getCandlestickData(candle):
+	if candle[3] >= candle[0]:
+		return [
+			1, # Bullish
+			convertToPips(candle[1] - candle[3]), # Wick up
+			convertToPips(candle[2] - candle[0]), # Wick down
+			convertToPips(candle[3] - candle[0]) # Body size
+		]
+	else:
+		return [
+			0, # Bearish
+			convertToPips(candle[1] - candle[0]), # Wick up
+			convertToPips(candle[2] - candle[3]), # Wick down
+			convertToPips(candle[0] - candle[3]) # Body size
+		]
+
+def getTrainData(data, lookup):
 	X = []
-	for i in range(periods.max()+lookup, data.shape[0]):
-		c_lookup = []
-		for j in range(i-lookup, i):
-			p_diff = []
-			for p_i in range(len(periods)-1):
-				p_x = periods[p_i]
-				for p_y in periods[p_i+1:]:
-					x = np.sum(data[j+1-p_x:j+1])/p_x
-					y = np.sum(data[j+1-p_y:j+1])/p_y
-					p_diff.append(convertToPips(x) - convertToPips(y))
-			c_lookup.append(p_diff)
-		X.append(c_lookup)
+	for i in range(lookup, data.shape[0]):
+			temp_candlesticks = []
+			for j in range(i-lookup, i):
+				temp_candlesticks.append(
+					getCandlestickData(data[j])
+				)
+
+			X.append(temp_candlesticks)
 	return np.array(X)
 
-lookup = 1
-periods = [1,2,3,5]
+lookup = 5
 timer = timeit()
-X = getSmaDiff(df.values, np.array(periods), lookup)
-X = normalize(X)
-X = X.reshape(
-	X.shape[0],
-	X.shape[1] * X.shape[2]
+train_data = getTrainData(
+	df.values,
+	lookup
 )
-
-# Visualize train data
-print('X: {}'.format(X[-5:]))
+train_data[:,:,1:] = normalize(train_data[:,:,1:])
+train_data = train_data.reshape(
+	train_data.shape[0],
+	train_data.shape[1] * train_data.shape[2]
+)
 timer.end()
 
-train_size = int(0.7 * X.shape[0])
-off = max(periods) + lookup
+print('Candlestick Data:\n%s'%train_data[-5:])
+print(train_data.shape)
 
-X_train = X[:train_size]
-y_train = df.values[off:train_size+off]
-X_val = X[train_size:]
-y_val = df.values[train_size+off:]
+train_size = int(df.shape[0] * 0.7)
+
+X_train = train_data[:train_size]
+y_train = df.values[lookup:train_size+lookup]
+X_val = train_data[train_size:]
+y_val = df.values[train_size+lookup:]
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
@@ -177,7 +188,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(X_train.shape[1], [8, 8, 4])
+		return BasicDenseModel(X_train.shape[1], [128, 128, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(self.max_pos, self.threshold)

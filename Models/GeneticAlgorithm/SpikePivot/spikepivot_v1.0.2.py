@@ -37,6 +37,8 @@ print()
 '''
 Feature Engineering
 '''
+
+# Convert price to pips
 @jit
 def convertToPips(x):
 	return np.around(x * 10000, 2)
@@ -44,45 +46,104 @@ def convertToPips(x):
 def normalize(x):
 	return (x - np.mean(x)) / np.std(x)
 
-# Produce SMA train data
-@jit
-def getSmaDiff(data, periods, lookup):
+def isLongSpike(data, threshold):
+	s_idx = int((data.shape[0]-1)/2)
+	s_high = convertToPips(data[s_idx, 1]) - threshold
+
+	for j in range(data.shape[0]):
+		if j == s_idx:
+			continue
+		c_high = convertToPips(data[j, 1])
+		if c_high > s_high:
+			return False
+	return True
+
+def isShortSpike(data, threshold):
+	s_idx = int((data.shape[0]-1)/2)
+	s_low = convertToPips(data[s_idx, 2]) + threshold
+
+	for j in range(data.shape[0]):
+		if j == s_idx:
+			continue
+		c_low = convertToPips(data[j, 2])
+		if c_low < s_low:
+			return False
+	return True
+
+def getTrainData(data):
+	spike_threshold = 1.0
+	lookback = 3
+	c_data = np.array([0,0,0,0], dtype=np.float32) # AB Spike LONG, Swing Dist LONG, AB Spike SHORT, Swing Dist SHORT
+
+	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
+	ad_data = [0,0,0,0, max(data[:lookback,1]), min(data[:lookback,2])] 
 	X = []
-	for i in range(periods.max()+lookup, data.shape[0]):
-		c_lookup = []
-		for j in range(i-lookup, i):
-			p_diff = []
-			for p_i in range(len(periods)-1):
-				p_x = periods[p_i]
-				for p_y in periods[p_i+1:]:
-					x = np.sum(data[j+1-p_x:j+1])/p_x
-					y = np.sum(data[j+1-p_y:j+1])/p_y
-					p_diff.append(convertToPips(x) - convertToPips(y))
-			c_lookup.append(p_diff)
-		X.append(c_lookup)
-	return np.array(X)
 
-lookup = 1
-periods = [1,2,3,5]
+	for i in range(lookback, data.shape[0]):
+		c_data = np.copy(c_data)
+
+		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
+		ad_data[5] = data[i,2] if data[i,2] < ad_data[5] else ad_data[5]
+
+		if c_data[0]:
+			c_data[0] = 1 if data[i,3] > ad_data[0] else -1
+			c_data[1] = convertToPips(data[i,3] - ad_data[1])
+
+			if data[i,3] < ad_data[1]:
+				c_data[0] = 0
+				c_data[1] = 0
+
+		if c_data[2]:
+			c_data[2] = 1 if data[i,3] < ad_data[2] else -1
+			c_data[3] = convertToPips(ad_data[3] - data[i,3])
+
+			if data[i,3] > ad_data[3]:
+				c_data[2] = 0
+				c_data[3] = 0
+
+		# Get Current Spike Info
+		if isLongSpike(
+			data[i+1-lookback:i+1],
+			spike_threshold
+		):
+			s_idx = int((lookback-1)/2)
+			ad_data[0] = data[i-s_idx, 1]
+			ad_data[1] = ad_data[5]
+			ad_data[5] = min(data[i+1-lookback:i+1, 2])
+
+			c_data[0] = 1 if data[i,3] > ad_data[0] else -1
+			c_data[1] = convertToPips(data[i,3] - ad_data[1])
+
+		if isShortSpike(
+			data[i+1-lookback:i+1],
+			spike_threshold
+		):
+			s_idx = int((lookback-1)/2)
+			ad_data[2] = data[i-s_idx, 2]
+			ad_data[3] = ad_data[4] 
+			ad_data[4] = max(data[i+1-lookback:i+1, 1])
+
+			c_data[2] = 1 if data[i,3] < ad_data[2] else -1
+			c_data[3] = convertToPips(ad_data[3] - data[i,3])
+
+		X.append(c_data)
+
+	return np.array(X, dtype=np.float32)
+
 timer = timeit()
-X = getSmaDiff(df.values, np.array(periods), lookup)
-X = normalize(X)
-X = X.reshape(
-	X.shape[0],
-	X.shape[1] * X.shape[2]
-)
-
-# Visualize train data
-print('X: {}'.format(X[-5:]))
+train_data = getTrainData(np.round(df.values, decimals=5))
+train_data[:,[1,3]] = normalize(train_data[:,[1,3]])
 timer.end()
 
-train_size = int(0.7 * X.shape[0])
-off = max(periods) + lookup
+print('Train Data:\n%s\n' % train_data[:5])
 
-X_train = X[:train_size]
-y_train = df.values[off:train_size+off]
-X_val = X[train_size:]
-y_val = df.values[train_size+off:]
+train_size = int(df.shape[0] * 0.7)
+period_off = 3
+
+X_train = train_data[:train_size]
+y_train = df.values[period_off:train_size+period_off].astype(np.float32)
+X_val = train_data[train_size:]
+y_val = df.values[train_size+period_off:].astype(np.float32)
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
@@ -104,7 +165,7 @@ def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	t_x = np.copy(x[:,2])
 	x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
 	x[:,2] = np.sum(x[:,2])/x[:,2].size
-	x[:,2] *= (250-50) + 50
+	x[:,2] *= (200-30) + 30
 	
 	t_x = np.copy(x[:,3])
 	x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
@@ -141,21 +202,15 @@ class BasicDenseModel(object):
 	def __call__(self, inpt):
 		return model_run(inpt, *self.W, *self.b)
 
-# Convert price to pips
-@jit
-def convertToPips(x):
-	return np.around(x * 10000, 2)
-
 class GeneticPlanModel(GA.GeneticAlgorithmModel):
-	def __init__(self, max_pos=2, threshold=0.5):
+	def __init__(self, threshold=0.5):
 		super().__init__()
-		self.max_pos = max_pos
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
 		results = bt.start(
-			GeneticPlanModel.run, y.astype(np.float32), self._model(X), self.threshold, self.max_pos
+			GeneticPlanModel.run, y.astype(np.float32), self._model(X), self.threshold
 		)
 		results = [
 			results[0], # Return
@@ -177,10 +232,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(X_train.shape[1], [8, 8, 4])
+		return BasicDenseModel(4, [4, 4, 4])
 
 	def newModel(self):
-		return GeneticPlanModel(self.max_pos, self.threshold)
+		return GeneticPlanModel(self.threshold)
 
 	def getWeights(self):
 		return (
@@ -204,55 +259,28 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		)
 
 	@jit
-	def run(i, positions, ohlc, result, data, out, threshold, max_pos):
-		sl = min(max(out[i][2], 50), 250)
-		tp = min(max(out[i][3], 30), 1300)
-			# Long Entry
-		if out[i][1] > (1 - threshold):
-			c_dir = bt.get_direction(positions, 0)
-			if not c_dir:
-				positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp)
-			elif c_dir == bt.BUY:
-				if bt.get_num_positions(positions) < max_pos:
-					positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp)
-			elif c_dir == bt.SELL:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, tp)
+	def run(i, positions, ohlc, result, data, out, threshold):
+		sl = min(max(out[i][2], 30), 200)
+		tp = min(max(out[i][3], 30), 400)
 
-
-		# Short Entry
-		if out[i][0] < threshold:
+		if out[i][0] > threshold:
 			c_dir = bt.get_direction(positions, 0)
+			# sl = min(max(out[i][1]+1.0, 30.0), 55.0) # TODO
 			if not c_dir:
-				positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp)
-			elif c_dir == bt.SELL:
-				if bt.get_num_positions(positions) < max_pos:
-					positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp)
-			elif c_dir == bt.BUY:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, tp)
+				positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp, sl)
+			elif c_dir != bt.BUY:
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, tp, sl)
+
+		elif out[i][1] > threshold:
+			c_dir = bt.get_direction(positions, 0)
+			# sl = min(max(out[i][3]+1.0, 30.0), 55.0) # TODO
+			if not c_dir:
+				positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp, sl)
+			elif c_dir != bt.SELL:
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, tp, sl)
 
 		return positions, result, data
 		
-
-# Test Dense Model
-bdm = BasicDenseModel(2, [16, 16, 4])
-
-print("Dense Model weights and biases:")
-print([i.shape for i in bdm.W])
-print([i.shape for i in bdm.b])
-
-# print("Test Dense model:")
-
-# for i in range(3):
-# 	bdm = BasicDenseModel(2, [32, 32, 4])
-# 	print(bdm(np.array([[-1,0],[1,1],[0,0]])))
-
-# gpm = GeneticPlanModel(130., 1000.)
-
-# print("\nTest Genetic Plan Model:")
-# print(gpm(X_train, y_train))
-# gpm = GeneticPlanModel(130., 1000.)
-# print(gpm(X_val, y_val))
-
 '''
 Create Genetic Algorithm
 '''
@@ -269,7 +297,7 @@ ga = GA.GeneticAlgorithm(
 def generate_models(num_models):
 	models = []
 	for i in range(num_models):
-		models.append(GeneticPlanModel(1, threshold=0.5))
+		models.append(GeneticPlanModel(threshold=0.5))
 	return models
 
 num_models = 5000
@@ -279,14 +307,6 @@ ga.fit(
 	val_data=(X_val, y_val),
 	generations=10
 )
-
-
-
-
-
-
-
-
 
 
 

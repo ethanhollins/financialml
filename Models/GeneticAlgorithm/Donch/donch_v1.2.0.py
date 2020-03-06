@@ -11,6 +11,7 @@ import time
 import pandas as pd
 import tensorflow as tf
 import bt
+import json
 
 class timeit(object):
 	def __init__(self):
@@ -84,7 +85,8 @@ train_data = getDonchUpDown(
 )
 timer.end()
 
-print('Donch Data:\n%s'%train_data[-5:])
+print('Donch Data:\n%s'%train_data[:5])
+# print('OHLC Data:\n%s'%df.values[period+1:period+1+5])
 print(train_data.shape)
 
 train_size = int(df.shape[0] * 0.7)
@@ -131,9 +133,9 @@ class BasicDenseModel(object):
 	def __call__(self, inpt):
 		x = np.matmul(inpt, self.W[0]) + self.b[0]
 		for i in range(1, len(self.W)):
-			x = tf.nn.relu(x)		
+			x = bt.relu(x)		
 			x = np.matmul(x, self.W[i]) + self.b[i]
-		return tf.nn.sigmoid(x).numpy()
+		return bt.sigmoid(x)
 
 # Convert price to pips
 @jit
@@ -172,6 +174,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	def generateModel(self, model_info):
 		return BasicDenseModel(2, [16, 16, 2])
 
+	def setModel(self, model):
+		self._model = model
+
 	def newModel(self):
 		return GeneticPlanModel(self.sl, self.tp, self.threshold)
 
@@ -196,23 +201,23 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			(self.val_results[2] / self.val_results[3]) if self.val_results[3] != 0 else 0
 		)
 
-	@jit
+	# @jit
 	def run(i, positions, ohlc, result, data, out, threshold, sl, tp):
 		# Long Entry
 		if out[i][1] > (1 - threshold):
 			c_dir = bt.get_direction(positions, 0)
 			if not c_dir:
-				positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp)
+				positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp, sl)
 			elif c_dir != bt.BUY:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0)
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0, sl)
 
 		# Short Entry
 		if out[i][0] < threshold:
 			c_dir = bt.get_direction(positions, 0)
 			if not c_dir:
-				positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp)
+				positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp, sl)
 			elif c_dir != bt.SELL:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0)
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0, sl)
 
 		return positions, result, data
 		
@@ -230,12 +235,12 @@ for i in range(3):
 	bdm = BasicDenseModel(2, [32, 32, 2])
 	print(bdm(np.array([[-1,0],[1,1],[0,0]])))
 
-gpm = GeneticPlanModel(130., 1000.)
+# gpm = GeneticPlanModel(130., 1000.)
 
-print("\nTest Genetic Plan Model:")
-print(gpm(X_train, y_train))
-gpm = GeneticPlanModel(130., 1000.)
-print(gpm(X_val, y_val))
+# print("\nTest Genetic Plan Model:")
+# print(gpm(X_train, y_train))
+# gpm = GeneticPlanModel(130., 1000.)
+# print(gpm(X_val, y_val))
 
 '''
 Create Genetic Algorithm
@@ -250,23 +255,41 @@ ga = GA.GeneticAlgorithm(
 	survival_rate=0.2
 )
 
-def generate_models(num_models):
-	models = []
-	for i in range(num_models):
-		models.append(GeneticPlanModel(130., 0., threshold=0.5))
-	return models
+# Saved Seeds: 20
+# ga.setSeed(1)
+# ga.save(0,4999, 'donch_v1.2.0')
 
-num_models = 5000
-ga.fit(
-	models=generate_models(num_models),
-	train_data=(X_train, y_train),
-	val_data=(X_val, y_val),
-	generations=10
-)
+# def generate_models(num_models):
+# 	models = []
+# 	for i in range(num_models):
+# 		models.append(GeneticPlanModel(130., 0., threshold=0.5))
+# 	return models
 
+# num_models = 5000
+# ga.fit(
+# 	models=generate_models(num_models),
+# 	train_data=(X_train, y_train),
+# 	val_data=(X_val, y_val),
+# 	generations=2
+# )
 
+'''
+Run Saved Model
+'''
 
+timestamps = df.index.values[period_off+y_train.shape[0]:]
+print(dl.convertTimestampToTime(timestamps[0]))
+gpm = GeneticPlanModel(130., 1000.)
+with open('./saved/donch_v1.2.0/0.json', 'r') as f:
+	info = json.load(f)
+	weights = [np.array(i, dtype=np.float32) for i in info['weights']]
 
+gpm.setModel(gpm.generateModel(None))
+gpm.setWeights(weights)
+print(gpm(X_train, y_train, training=True))
+print(gpm(X_val, y_val))
+print(gpm)
+	
 
 
 

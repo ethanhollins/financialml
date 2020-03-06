@@ -160,8 +160,8 @@ class DataLoader(object):
 				ts = self.convertUTCTimeToTimestamp(time)
 
 				result['timestamp'].append(ts)
-				asks = list(map(float, i['bid'].values()))
-				bids = list(map(float, i['ask'].values()))
+				asks = list(map(float, i['ask'].values()))
+				bids = list(map(float, i['bid'].values()))
 				result['ask_open'].append(asks[0])
 				result['ask_high'].append(asks[1])
 				result['ask_low'].append(asks[2])
@@ -190,7 +190,17 @@ class DataLoader(object):
 	def _oandaIsLastCandleFound(self, period, start_dt, end_dt, count):
 		if period == Constants.ONE_MINUTE:
 			return start_dt + datetime.timedelta(minutes=count) >= end_dt
-		if period == Constants.THIRTY_MINUTES:
+		elif period == Constants.TWO_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*2) >= end_dt
+		elif period == Constants.THREE_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*3) >= end_dt
+		elif period == Constants.FIVE_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*5) >= end_dt
+		elif period == Constants.TEN_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*10) >= end_dt
+		elif period == Constants.FIFTEEN_MINUTES:
+			return start_dt + datetime.timedelta(minutes=count*15) >= end_dt
+		elif period == Constants.THIRTY_MINUTES:
 			return start_dt + datetime.timedelta(minutes=count*30) >= end_dt
 		elif period == Constants.ONE_HOUR:
 			return start_dt + datetime.timedelta(hours=count) >= end_dt

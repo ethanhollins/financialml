@@ -37,52 +37,106 @@ print()
 '''
 Feature Engineering
 '''
-@jit
-def convertToPips(x):
-	return np.around(x * 10000, 2)
 
-def normalize(x):
-	return (x - np.mean(x)) / np.std(x)
-
-# Produce SMA train data
-@jit
-def getSmaDiff(data, periods, lookup):
+# Get donchian data
+def getDonchUpDown(high, low, period):
 	X = []
-	for i in range(periods.max()+lookup, data.shape[0]):
-		c_lookup = []
-		for j in range(i-lookup, i):
-			p_diff = []
-			for p_i in range(len(periods)-1):
-				p_x = periods[p_i]
-				for p_y in periods[p_i+1:]:
-					x = np.sum(data[j+1-p_x:j+1])/p_x
-					y = np.sum(data[j+1-p_y:j+1])/p_y
-					p_diff.append(convertToPips(x) - convertToPips(y))
-			c_lookup.append(p_diff)
-		X.append(c_lookup)
-	return np.array(X)
+	last_high = 0
+	last_low = 0
+	for i in range(period, high.shape[0]):
+		c_high = 0.
+		c_low = 0.
 
-lookup = 1
-periods = [1,2,3,5]
+		for j in range(i+1-period, i+1):
+			if c_high == 0 or high[j] > c_high:
+				c_high = high[j]
+			if c_low == 0 or low[j] < c_low:
+				c_low = low[j]
+
+		if last_high != 0 and last_low != 0:
+			x = []
+			if c_high > last_high:
+				x.append(1)
+			elif c_high == last_high:
+				x.append(0)
+			elif c_high < last_high:
+				x.append(-1)
+
+			if c_low > last_low:
+				x.append(1)
+			elif c_low == last_low:
+				x.append(0)
+			elif c_low < last_low:
+				x.append(-1)
+
+			X.append(x)
+		last_high = c_high
+		last_low = c_low
+
+	return np.array(X, dtype=np.float32)
+
+def getDonchUpDownTwo(high, low, period):
+	X = []
+	last_high = 0
+	last_low = 0
+	for i in range(period, high.shape[0]):
+		c_high = 0.
+		c_low = 0.
+
+		for j in range(i-period, i):
+			if c_high == 0 or high[j] > c_high:
+				c_high = high[j]
+			if c_low == 0 or low[j] < c_low:
+				c_low = low[j]
+
+		if last_high != 0 and last_low != 0:
+			x = []
+			if c_high > last_high:
+				x.append(1)
+			elif c_high == last_high:
+				x.append(0)
+			elif c_high < last_high:
+				x.append(-1)
+
+			if c_low > last_low:
+				x.append(1)
+			elif c_low == last_low:
+				x.append(0)
+			elif c_low < last_low:
+				x.append(-1)
+
+			X.append(x)
+		last_high = c_high
+		last_low = c_low
+
+	return np.array(X, dtype=np.float32)
+
+period = 4
 timer = timeit()
-X = getSmaDiff(df.values, np.array(periods), lookup)
-X = normalize(X)
-X = X.reshape(
-	X.shape[0],
-	X.shape[1] * X.shape[2]
+train_data_one = getDonchUpDownTwo(
+	df.values[:,1],
+	df.values[:,2],
+	period
 )
-
-# Visualize train data
-print('X: {}'.format(X[-5:]))
+train_data_two = getDonchUpDownTwo(
+	df.values[:,1],
+	df.values[:,2],
+	period-1
+)[1:]
 timer.end()
 
-train_size = int(0.7 * X.shape[0])
-off = max(periods) + lookup
+train_data = np.concatenate((train_data_one, train_data_two), axis=1)
 
-X_train = X[:train_size]
-y_train = df.values[off:train_size+off]
-X_val = X[train_size:]
-y_val = df.values[train_size+off:]
+print('Donch Data:\n%s'%train_data[-5:])
+print(train_data.shape)
+
+train_size = int(df.shape[0] * 0.7)
+period_off = period+1
+
+X_train = train_data[:train_size]
+y_train = df.values[period_off:train_size+period_off].astype(np.float32)
+X_val = train_data[train_size:]
+y_val = df.values[train_size+period_off:].astype(np.float32)
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
@@ -90,27 +144,6 @@ print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
 '''
 Create Genetic Model
 '''
-
-@jit(forceobj=True)
-def model_run(inpt, W1, W2, W3, b1, b2, b3):
-	x = np.matmul(inpt, W1) + b1
-	x = bt.relu(x)		
-	x = np.matmul(x, W2) + b2
-	x = bt.relu(x)		
-	x = np.matmul(x, W3) + b3
-	
-	x[:,:2] = bt.sigmoid(x[:,:2])
-
-	t_x = np.copy(x[:,2])
-	x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,2] = np.sum(x[:,2])/x[:,2].size
-	x[:,2] *= (250-50) + 50
-	
-	t_x = np.copy(x[:,3])
-	x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,3] = np.sum(x[:,3])/x[:,3].size
-	x[:,3] *= (1300-30) + 30
-	return x
 
 class BasicDenseModel(object):
 	def __init__(self, in_size, layers):
@@ -139,7 +172,11 @@ class BasicDenseModel(object):
 			)
 
 	def __call__(self, inpt):
-		return model_run(inpt, *self.W, *self.b)
+		x = np.matmul(inpt, self.W[0]) + self.b[0]
+		for i in range(1, len(self.W)):
+			x = tf.nn.relu(x)		
+			x = np.matmul(x, self.W[i]) + self.b[i]
+		return tf.nn.sigmoid(x).numpy()
 
 # Convert price to pips
 @jit
@@ -147,16 +184,15 @@ def convertToPips(x):
 	return np.around(x * 10000, 2)
 
 class GeneticPlanModel(GA.GeneticAlgorithmModel):
-	def __init__(self, max_pos=2, threshold=0.5):
+	def __init__(self, sl, tp, threshold=0.5):
 		super().__init__()
-		self.max_pos = max_pos
+		self.sl = sl
+		self.tp = tp
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
-		results = bt.start(
-			GeneticPlanModel.run, y.astype(np.float32), self._model(X), self.threshold, self.max_pos
-		)
+		results = bt.start(GeneticPlanModel.run, y.astype(np.float32), self._model(X), self.threshold, self.sl, self.tp)
 		results = [
 			results[0], # Return
 			results[4], # Drawdown
@@ -177,10 +213,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(X_train.shape[1], [8, 8, 4])
+		return BasicDenseModel(4, [16, 16, 2])
 
 	def newModel(self):
-		return GeneticPlanModel(self.max_pos, self.threshold)
+		return GeneticPlanModel(self.sl, self.tp, self.threshold)
 
 	def getWeights(self):
 		return (
@@ -204,54 +240,45 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		)
 
 	@jit
-	def run(i, positions, ohlc, result, data, out, threshold, max_pos):
-		sl = min(max(out[i][2], 50), 250)
-		tp = min(max(out[i][3], 30), 1300)
-			# Long Entry
+	def run(i, positions, ohlc, result, data, out, threshold, sl, tp):
+		# Long Entry
 		if out[i][1] > (1 - threshold):
 			c_dir = bt.get_direction(positions, 0)
 			if not c_dir:
 				positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp)
-			elif c_dir == bt.BUY:
-				if bt.get_num_positions(positions) < max_pos:
-					positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, tp)
-			elif c_dir == bt.SELL:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, tp)
-
+			elif c_dir != bt.BUY:
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0)
 
 		# Short Entry
 		if out[i][0] < threshold:
 			c_dir = bt.get_direction(positions, 0)
 			if not c_dir:
 				positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp)
-			elif c_dir == bt.SELL:
-				if bt.get_num_positions(positions) < max_pos:
-					positions = bt.create_position(positions, ohlc[i], bt.SELL, sl, tp)
-			elif c_dir == bt.BUY:
-				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, tp)
+			elif c_dir != bt.SELL:
+				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0)
 
 		return positions, result, data
 		
 
 # Test Dense Model
-bdm = BasicDenseModel(2, [16, 16, 4])
+bdm = BasicDenseModel(2, [16, 16, 2])
 
 print("Dense Model weights and biases:")
 print([i.shape for i in bdm.W])
 print([i.shape for i in bdm.b])
 
-# print("Test Dense model:")
+print("Test Dense model:")
 
-# for i in range(3):
-# 	bdm = BasicDenseModel(2, [32, 32, 4])
-# 	print(bdm(np.array([[-1,0],[1,1],[0,0]])))
+for i in range(3):
+	bdm = BasicDenseModel(2, [32, 32, 2])
+	print(bdm(np.array([[-1,0],[1,1],[0,0]])))
 
-# gpm = GeneticPlanModel(130., 1000.)
+gpm = GeneticPlanModel(130., 1000.)
 
-# print("\nTest Genetic Plan Model:")
-# print(gpm(X_train, y_train))
-# gpm = GeneticPlanModel(130., 1000.)
-# print(gpm(X_val, y_val))
+print("\nTest Genetic Plan Model:")
+print(gpm(X_train, y_train))
+gpm = GeneticPlanModel(130., 1000.)
+print(gpm(X_val, y_val))
 
 '''
 Create Genetic Algorithm
@@ -269,7 +296,7 @@ ga = GA.GeneticAlgorithm(
 def generate_models(num_models):
 	models = []
 	for i in range(num_models):
-		models.append(GeneticPlanModel(1, threshold=0.5))
+		models.append(GeneticPlanModel(130., 0., threshold=0.5))
 	return models
 
 num_models = 5000

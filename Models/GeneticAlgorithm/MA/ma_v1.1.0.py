@@ -26,7 +26,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2017,1,1))
+df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2017,1,1))
 df = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']]
 
 # Visualize data
@@ -57,16 +57,16 @@ def getSmaDiff(data, periods, lookup):
 				for p_y in periods[p_i+1:]:
 					x = np.sum(data[j+1-p_x:j+1])/p_x
 					y = np.sum(data[j+1-p_y:j+1])/p_y
-					p_diff.append(convertToPips(x) - convertToPips(y))
+					p_diff.append(1 if x > y else 0)
 			c_lookup.append(p_diff)
 		X.append(c_lookup)
 	return np.array(X)
 
 lookup = 1
-periods = [1,2,3,5]
+periods = [1,2,5,10]
 timer = timeit()
 X = getSmaDiff(df.values, np.array(periods), lookup)
-X = normalize(X)
+# X = normalize(X)
 X = X.reshape(
 	X.shape[0],
 	X.shape[1] * X.shape[2]
@@ -177,7 +177,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(X_train.shape[1], [8, 8, 4])
+		return BasicDenseModel(X_train.shape[1], [64, 64, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(self.max_pos, self.threshold)

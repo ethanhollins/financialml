@@ -4,6 +4,8 @@ import numpy as np
 import math
 import sys
 import time
+import json
+import os
 
 tf.keras.backend.set_floatx('float64')
 
@@ -313,6 +315,7 @@ class GeneticAlgorithm(object):
 		self._crossover_opt = crossover_opt
 		self._mutation_opt = mutation_opt
 		self._survival_rate = survival_rate
+		self._save = []
 
 	def add(self, model):
 		self._models.append(model)
@@ -350,6 +353,7 @@ class GeneticAlgorithm(object):
 		for generation in range(generations):
 			train_fit, val_fit = self(gen=generation)
 			self.report(generation, train_fit, val_fit)
+			self._onSave(generation)
 			self.optimize(np.array(train_fit))
 
 	def __call__(self, gen=0):
@@ -445,10 +449,39 @@ class GeneticAlgorithm(object):
 			))
 
 		for i in sorted(enumerate(train_arr), key=lambda x: x[1], reverse=True)[:5]:
-			print(self._models[i[0]])
+			print(' ({}):\n{}'.format(i[0], self._models[i[0]]))
+
+		if len(val_fit) > 0:
+			print(' Mid Point:')
+			mid = (train_arr + np.array(val_fit)) / 2.0
+			count = 0
+			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
+				if count >= 2:
+					break
+
+				if i[1] != 0.0:
+					print(' ({}):\n{}'.format(i[0], self._models[i[0]]))
+					count += 1
+
+	def setSeed(self, seed):
+		np.random.seed(seed)
 
 	def load(self):
 		return
 
-	def save(self):
-		return
+	def save(self, gen, model_num, name, data={}):
+		self._save.append((gen, model_num, name, data))
+
+	def _onSave(self, gen):
+		for i in self._save:
+			if i[0] == gen:
+				print('Saving...\n%s' % self._models[i[1]])
+				path = os.path.join('saved', '{}'.format(i[2]))
+				if not os.path.exists(path):
+					os.makedirs(path)
+				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
+				
+				weights = {'weights': [x.tolist() for x in self._models[i[1]].getWeights()]}
+				weights.update(i[3])
+				with open(path_weights, 'w') as f:
+					f.write(json.dumps(weights, indent=2))

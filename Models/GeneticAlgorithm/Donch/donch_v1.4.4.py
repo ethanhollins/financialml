@@ -37,52 +37,63 @@ print()
 '''
 Feature Engineering
 '''
-@jit
-def convertToPips(x):
-	return np.around(x * 10000, 2)
 
-def normalize(x):
-	return (x - np.mean(x)) / np.std(x)
-
-# Produce SMA train data
-@jit
-def getSmaDiff(data, periods, lookup):
+# Get donchian data
+def getDonchUpDown(high, low, period):
 	X = []
-	for i in range(periods.max()+lookup, data.shape[0]):
-		c_lookup = []
-		for j in range(i-lookup, i):
-			p_diff = []
-			for p_i in range(len(periods)-1):
-				p_x = periods[p_i]
-				for p_y in periods[p_i+1:]:
-					x = np.sum(data[j+1-p_x:j+1])/p_x
-					y = np.sum(data[j+1-p_y:j+1])/p_y
-					p_diff.append(convertToPips(x) - convertToPips(y))
-			c_lookup.append(p_diff)
-		X.append(c_lookup)
-	return np.array(X)
+	last_high = 0
+	last_low = 0
+	for i in range(period, high.shape[0]):
+		c_high = 0.
+		c_low = 0.
 
-lookup = 1
-periods = [1,2,3,5]
+		for j in range(i-period, i):
+			if c_high == 0 or high[j] > c_high:
+				c_high = high[j]
+			if c_low == 0 or low[j] < c_low:
+				c_low = low[j]
+
+		if last_high != 0 and last_low != 0:
+			x = []
+			if c_high > last_high:
+				x.append(1)
+			elif c_high == last_high:
+				x.append(0)
+			elif c_high < last_high:
+				x.append(-1)
+
+			if c_low > last_low:
+				x.append(1)
+			elif c_low == last_low:
+				x.append(0)
+			elif c_low < last_low:
+				x.append(-1)
+
+			X.append(x)
+		last_high = c_high
+		last_low = c_low
+
+	return np.array(X, dtype=np.float32)
+
+period = 4
 timer = timeit()
-X = getSmaDiff(df.values, np.array(periods), lookup)
-X = normalize(X)
-X = X.reshape(
-	X.shape[0],
-	X.shape[1] * X.shape[2]
+train_data = getDonchUpDown(
+	df.values[:,1],
+	df.values[:,2],
+	period
 )
-
-# Visualize train data
-print('X: {}'.format(X[-5:]))
 timer.end()
 
-train_size = int(0.7 * X.shape[0])
-off = max(periods) + lookup
+print('Donch Data:\n%s'%train_data[-5:])
+print(train_data.shape)
 
-X_train = X[:train_size]
-y_train = df.values[off:train_size+off]
-X_val = X[train_size:]
-y_val = df.values[train_size+off:]
+train_size = int(df.shape[0] * 0.7)
+period_off = period+1
+
+X_train = train_data[:train_size]
+y_train = df.values[period_off:train_size+period_off].astype(np.float32)
+X_val = train_data[train_size:]
+y_val = df.values[train_size+period_off:].astype(np.float32)
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
@@ -177,7 +188,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret * gpr) - pow(dd, 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(X_train.shape[1], [8, 8, 4])
+		return BasicDenseModel(2, [32, 32, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(self.max_pos, self.threshold)
