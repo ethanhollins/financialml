@@ -11,7 +11,6 @@ import time
 import pandas as pd
 import tensorflow as tf
 import bt
-import json
 
 class timeit(object):
 	def __init__(self):
@@ -27,8 +26,8 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.FIFTEEN_MINUTES, start=dt.datetime(2019,3,1), end=dt.datetime(2019,11,1))
-# df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,5,1), end=dt.datetime(2019,11,1))
+
 # Visualize data
 print('\nData:\n%s'%df.head(5))
 print(df.shape)
@@ -46,128 +45,66 @@ def convertToPips(x):
 def normalize(x, mean, std):
 	return (x - mean) / std
 
-def restrictTimePeriod(data):
+# Get donchian data
+def getDonchUpDown(high, low, period):
 	X = []
-	for i in range(data.shape[0]):
-		ts = data.index.values[i]
-		time = dl.convertTimestampToTime(ts)
-		london_time = dl.convertTimezone(time, 'Europe/London')
-		if 8 <= time.hour < 20:
-			X.append(data.values[i])
+	last_high = 0
+	last_low = 0
+	for i in range(period, high.shape[0]):
+		c_high = 0.
+		c_low = 0.
+		x = []
+
+		for j in range(i+1-period, i+1):
+			if c_high == 0 or high[j] > c_high:
+				c_high = high[j]
+			if c_low == 0 or low[j] < c_low:
+				c_low = low[j]
+
+		if last_high and last_low:
+			x.append(convertToPips(c_high - last_high))
+			x.append(convertToPips(c_low - last_low))
+
+			X.append(x)
+
+		last_high = c_high
+		last_low = c_low
+
 	return np.array(X, dtype=np.float32)
 
-@jit
-def isLongSpike(data, threshold):
-	s_idx = int((data.shape[0]-1)/2)
-	s_high = convertToPips(data[s_idx, 1]) - threshold
-
-	for j in range(data.shape[0]):
-		if j == s_idx:
-			continue
-		c_high = convertToPips(data[j, 1])
-		if c_high > s_high:
-			return False
-	return True
-
-@jit
-def isShortSpike(data, threshold):
-	s_idx = int((data.shape[0]-1)/2)
-	s_low = convertToPips(data[s_idx, 2]) + threshold
-
-	for j in range(data.shape[0]):
-		if j == s_idx:
-			continue
-		c_low = convertToPips(data[j, 2])
-		if c_low < s_low:
-			return False
-	return True
-
-# @jit
-def getTrainData(data, timestamps):
-	spike_threshold = 1.0
-	lookback = 3
-	c_data = np.array([0,0,0], dtype=np.float32) # LONG DIST, SHORT DIST
-
-	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
-	ad_data = [0,0,0,0, max(data[:lookback,1]), min(data[:lookback,2])] 
-	X = []
-
-	for i in range(lookback, data.shape[0]):
-		c_data = np.copy(c_data)
-
-		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
-		ad_data[5] = data[i,2] if data[i,2] < ad_data[5] else ad_data[5]
-
-		if c_data[0]:
-			c_data[0] = convertToPips((data[i,3] - ad_data[0]) * (ad_data[1] / ad_data[0]))
-
-		if c_data[1]:
-			c_data[1] = convertToPips((ad_data[2] - data[i,3]) * (ad_data[2] / ad_data[3]))
-
-		# Get Current Spike Info
-		if isLongSpike(
-			data[i+1-lookback:i+1],
-			spike_threshold
-		):
-			s_idx = int((lookback-1)/2)
-			ad_data[0] = data[i-s_idx, 1]
-			ad_data[1] = ad_data[5]
-			ad_data[5] = min(data[i+1-lookback:i+1, 2])
- 
-			c_data[0] = convertToPips((data[i,3] - ad_data[0]) * (ad_data[1] / ad_data[0]))
-
-		if isShortSpike(
-			data[i+1-lookback:i+1],
-			spike_threshold
-		):
-			s_idx = int((lookback-1)/2)
-			ad_data[2] = data[i-s_idx, 2]
-			ad_data[3] = ad_data[4] 
-			ad_data[4] = max(data[i+1-lookback:i+1, 1])
-
-			c_data[1] = convertToPips((ad_data[2] - data[i,3]) * (ad_data[2] / ad_data[3]))
-
-		time = dl.convertTimestampToTime(timestamps[i])
-		london_time = dl.convertTimezone(time, 'Europe/London')
-		c_data[2] = london_time.hour
-		X.append(c_data)
-
-	return X
-
+period = 10
 timer = timeit()
-train_data = np.array(getTrainData(np.round(df.values[:,4:], decimals=5), df.index.values), dtype=np.float32)
+train_data = getDonchUpDown(
+	df.values[:,1],
+	df.values[:,2],
+	period
+)
 timer.end()
 
-print('Train Data:\n%s\n' % train_data[:5])
+print('Donch Data:\n%s'%train_data[-5:])
+print(train_data.shape)
 
 train_size = int(df.shape[0] * 0.7)
-period_off = 3
+period_off = period+1
 
 X_train = train_data[:train_size]
 y_train = df.values[period_off:train_size+period_off].astype(np.float32)
 X_val = train_data[train_size:]
 y_val = df.values[train_size+period_off:].astype(np.float32)
 
-mean = np.mean(X_train[:,:2])
-std = np.std(X_train[:,:2])
-time_mean = np.mean(list(range(24)))
-time_std = np.std(list(range(24)))
+mean = 0
+std = np.std(X_train)
+X_train = normalize(X_train, mean, std)
+X_val = normalize(X_val, mean, std)
 
-X_train_norm = np.copy(X_train)
-X_val_norm = np.copy(X_val)
-X_train_norm[:,:2] = normalize(X_train[:,:2], mean, std)
-X_train_norm[:,2] = normalize(X_train[:,2], time_mean, time_std)
-X_val_norm[:,:2] = normalize(X_val[:,:2], mean, std)
-X_val_norm[:,2] = normalize(X_val[:,2], time_mean, time_std)
-
-print('Train Data: {} {}'.format(X_train_norm.shape, y_train.shape))
-print('Val Data: {} {}'.format(X_val_norm.shape, y_val.shape))
+print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
+print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
 
 '''
 Create Genetic Model
 '''
 
-# @jit(forceobj=True)
+@jit(forceobj=True)
 def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	x = np.matmul(inpt, W1) + b1
 	x = bt.relu(x)		
@@ -175,6 +112,7 @@ def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	x = bt.relu(x)		
 	x = np.matmul(x, W3) + b3
 	x = bt.sigmoid(x)
+	
 	return x
 
 class BasicDenseModel(object):
@@ -213,29 +151,18 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
+		results = bt.start(
+			GeneticPlanModel.run, y.astype(np.float32), self.threshold, self._model(X)
+		)
+		results = [
+			results[0], # Return
+			results[4], # Drawdown
+			results[1],	# Gain
+			results[2],	# Loss
+		]
 		if training:
-			results = bt.start(
-				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				self._model(X)
-			)
-			results = [
-				results[0], # Return
-				results[4], # Drawdown
-				results[1],	# Gain
-				results[2],	# Loss
-			]
 			self.train_results = results
 		else:
-			results = bt.start(
-				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				self._model(X)
-			)
-			results = [
-				results[0], # Return
-				results[4], # Drawdown
-				results[1],	# Gain
-				results[2],	# Loss
-			]
 			self.val_results = results
 		return self.getPerformance(*results)
 
@@ -244,10 +171,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			gpr = 0.0
 		else:
 			gpr = (gain / loss) + 1
-		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
+		return ret - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(3, [32, 32, 2])
+		return BasicDenseModel(2, [16, 16, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.threshold)
@@ -276,7 +203,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 55.0
+		sl = 20.0
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
@@ -297,6 +224,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 		return positions, result, data
 		
+
 '''
 Create Genetic Algorithm
 '''
@@ -323,9 +251,18 @@ def generate_models(num_models):
 num_models = 5000
 ga.fit(
 	models=generate_models(num_models),
-	train_data=(X_train_norm, y_train),
-	val_data=(X_val_norm, y_val),
-	generations=50
+	train_data=(X_train, y_train),
+	val_data=(X_val, y_val),
+	generations=30
 )
+
+
+
+
+
+
+
+
+
 
 

@@ -27,7 +27,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.FIFTEEN_MINUTES, start=dt.datetime(2019,3,1), end=dt.datetime(2019,11,1))
+df = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=dt.datetime(2017,1,1), end=dt.datetime(2019,1,1))
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -86,7 +86,7 @@ def isShortSpike(data, threshold):
 def getTrainData(data, timestamps):
 	spike_threshold = 1.0
 	lookback = 3
-	c_data = np.array([0,0,0], dtype=np.float32) # LONG DIST, SHORT DIST
+	c_data = np.array([0,0], dtype=np.float32) # LONG DIST, SHORT DIST
 
 	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
 	ad_data = [0,0,0,0, max(data[:lookback,1]), min(data[:lookback,2])] 
@@ -127,10 +127,12 @@ def getTrainData(data, timestamps):
 
 			c_data[1] = convertToPips((ad_data[2] - data[i,3]) * (ad_data[2] / ad_data[3]))
 
-		time = dl.convertTimestampToTime(timestamps[i])
-		london_time = dl.convertTimezone(time, 'Europe/London')
-		c_data[2] = london_time.hour
+		# time = dl.convertTimestampToTime(timestamps[i])
+		# london_time = dl.convertTimezone(time, 'Europe/London')
+		# if 8 <= time.hour < 20:
 		X.append(c_data)
+		# else:
+		# 	X.append(np.array([-999,-999], dtype=np.float32))
 
 	return X
 
@@ -148,26 +150,19 @@ y_train = df.values[period_off:train_size+period_off].astype(np.float32)
 X_val = train_data[train_size:]
 y_val = df.values[train_size+period_off:].astype(np.float32)
 
-mean = np.mean(X_train[:,:2])
-std = np.std(X_train[:,:2])
-time_mean = np.mean(list(range(24)))
-time_std = np.std(list(range(24)))
+mean = np.mean(X_train)
+std = np.std(X_train)
+X_train_norm = normalize(X_train, mean, std)
+X_val_norm = normalize(X_val, mean, std)
 
-X_train_norm = np.copy(X_train)
-X_val_norm = np.copy(X_val)
-X_train_norm[:,:2] = normalize(X_train[:,:2], mean, std)
-X_train_norm[:,2] = normalize(X_train[:,2], time_mean, time_std)
-X_val_norm[:,:2] = normalize(X_val[:,:2], mean, std)
-X_val_norm[:,2] = normalize(X_val[:,2], time_mean, time_std)
-
-print('Train Data: {} {}'.format(X_train_norm.shape, y_train.shape))
-print('Val Data: {} {}'.format(X_val_norm.shape, y_val.shape))
+print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
+print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
 
 '''
 Create Genetic Model
 '''
 
-# @jit(forceobj=True)
+@jit(forceobj=True)
 def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	x = np.matmul(inpt, W1) + b1
 	x = bt.relu(x)		
@@ -207,8 +202,10 @@ class BasicDenseModel(object):
 		return model_run(inpt, *self.W, *self.b)
 
 class GeneticPlanModel(GA.GeneticAlgorithmModel):
-	def __init__(self, threshold=0.5):
+	def __init__(self, train_data, val_data, threshold=0.5):
 		super().__init__()
+		self.train_data = train_data
+		self.val_data = val_data
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
@@ -247,10 +244,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(3, [32, 32, 2])
+		return BasicDenseModel(2, [16, 16, 2])
 
 	def newModel(self):
-		return GeneticPlanModel(self.threshold)
+		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
 
 	def getWeights(self):
 		return (
@@ -276,7 +273,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 55.0
+		sl = 150.0
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
@@ -311,13 +308,13 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-# ga.save(16, 1552, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
-# ga.save(16, 2, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
+ga.save(20, 15, 'v1.3.2', {'mean': float(mean), 'std': float(std)})
+ga.save(20, 3094, 'v1.3.2', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
 	for i in range(num_models):
-		models.append(GeneticPlanModel(threshold=0.5))
+		models.append(GeneticPlanModel(X_train, X_val, threshold=0.5))
 	return models
 
 num_models = 5000

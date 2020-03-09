@@ -1,13 +1,10 @@
 from numba import jit
-import tensorflow as tf
 import numpy as np
 import math
 import sys
 import time
 import json
 import os
-
-tf.keras.backend.set_floatx('float64')
 
 '''
 Generic functions
@@ -175,32 +172,6 @@ class PreserveBestMutation(object):
 			new_weights = self._mutate_func(weights, self._mutation_rate, self._mean, self._std)
 			model.setWeights(new_weights)
 
-### Keras Model Generators
-
-def generic_lstm_model_generator(mean, std):
-	model = tf.keras.models.Sequential()
-	model.add(tf.keras.layers.LSTM(
-		16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
-	))
-	model.add(tf.keras.layers.Dense(
-		1, activation='sigmoid',
-		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
-	))
-	return model
-
-
-def generic_dense_model_generator(mean, std):
-	model = tf.keras.models.Sequential()
-	model.add(tf.keras.layers.Dense(
-		32, activation='relu',
-		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
-	))
-	model.add(tf.keras.layers.Dense(
-		1, activation='sigmoid',
-		kernel_initializer=tf.keras.initializers.RandomNormal(mean=mean, stddev=std)
-	))
-	return model
-
 
 '''
 Genetic Algorithm Model
@@ -224,16 +195,8 @@ class GeneticAlgorithmModel(object):
 			self._model = self.generateModel(self.getModelInfo())
 
 	def generateModel(self, model_info):
-		model = tf.keras.models.Sequential()
-		model.add(tf.keras.layers.LSTM(
-			16, kernel_initializer=tf.keras.initializers.RandomNormal(mean=model_info[0], stddev=model_info[1])
-		))
-		model.add(tf.keras.layers.Dense(
-			1, activation='sigmoid',
-			kernel_initializer=tf.keras.initializers.RandomNormal(mean=model_info[0], stddev=model_info[1])
-		))
-		model.build(input_shape=model_info[2])
-		return model
+		raise Exception('Generate Model function not found.')
+		return
 
 	def getModel(self):
 		return self._model
@@ -456,7 +419,7 @@ class GeneticAlgorithm(object):
 			mid = (train_arr + np.array(val_fit)) / 2.0
 			count = 0
 			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
-				if count >= 2:
+				if count >= 5:
 					break
 
 				if i[1] != 0.0:
