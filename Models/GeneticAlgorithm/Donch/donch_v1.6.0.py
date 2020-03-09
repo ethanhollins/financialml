@@ -9,7 +9,6 @@ import numpy as np
 import datetime as dt
 import time
 import pandas as pd
-import tensorflow as tf
 import bt
 
 class timeit(object):
@@ -26,7 +25,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,5,1), end=dt.datetime(2019,11,1))
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,9,1), current=True)
 
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -262,6 +261,7 @@ ga = GA.GeneticAlgorithm(
 ga.setSeed(1)
 # ga.save(16, 1552, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
 # ga.save(16, 2, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.6.0', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -274,7 +274,7 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train, y_train),
 	val_data=(X_val, y_val),
-	generations=100
+	generations=50
 )
 
 

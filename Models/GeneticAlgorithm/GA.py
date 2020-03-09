@@ -279,6 +279,7 @@ class GeneticAlgorithm(object):
 		self._mutation_opt = mutation_opt
 		self._survival_rate = survival_rate
 		self._save = []
+		self._save_best = None
 
 	def add(self, model):
 		self._models.append(model)
@@ -317,7 +318,13 @@ class GeneticAlgorithm(object):
 			train_fit, val_fit = self(gen=generation)
 			self.report(generation, train_fit, val_fit)
 			self._onSave(generation)
-			self.optimize(np.array(train_fit))
+
+			if generation+1 == generations:
+				self._onSaveBest(train_fit, val_fit)
+			else:
+				self.optimize(np.array(train_fit))
+
+		print('Training completed.')
 
 	def __call__(self, gen=0):
 		train_fit = []
@@ -419,7 +426,7 @@ class GeneticAlgorithm(object):
 			mid = (train_arr + np.array(val_fit)) / 2.0
 			count = 0
 			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
-				if count >= 5:
+				if count >= 10:
 					break
 
 				if i[1] != 0.0:
@@ -435,6 +442,9 @@ class GeneticAlgorithm(object):
 	def save(self, gen, model_num, name, data={}):
 		self._save.append((gen, model_num, name, data))
 
+	def saveBest(self, num_models, name, data={}):
+		self._save_best = (num_models, name, data)
+
 	def _onSave(self, gen):
 		for i in self._save:
 			if i[0] == gen:
@@ -448,3 +458,25 @@ class GeneticAlgorithm(object):
 				weights.update(i[3])
 				with open(path_weights, 'w') as f:
 					f.write(json.dumps(weights, indent=2))
+
+	def _onSaveBest(self, train_fit, val_fit):
+		if self._save_best:
+			train_arr = np.array(train_fit)[:,0]
+			mid = (train_arr + np.array(val_fit)) / 2.0
+			count = 0
+			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
+				if count >= self._save_best[0]:
+					break
+
+				print('Saving...\n%s' % self._models[i[0]])
+				path = os.path.join('saved', '{}'.format(self._save_best[1]))
+				if not os.path.exists(path):
+					os.makedirs(path)
+				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
+				
+				weights = {'weights': [x.tolist() for x in self._models[i[0]].getWeights()]}
+				weights.update(self._save_best[2])
+				with open(path_weights, 'w') as f:
+					f.write(json.dumps(weights, indent=2))
+
+				count += 1
