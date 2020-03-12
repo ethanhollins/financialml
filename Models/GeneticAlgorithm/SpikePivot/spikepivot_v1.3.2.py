@@ -26,10 +26,10 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start_data = dt.datetime(2018,10,1)
-start = dt.datetime(2019,1,1)
+start_data = dt.datetime(2018,7,1)
+start = dt.datetime(2018,9,1)
 start_ts = dl.convertTimeToTimestamp(start)
-end = dt.datetime(2019,6,1)
+end = dt.datetime(2019,4,1)
 
 df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
@@ -169,15 +169,13 @@ Create Genetic Model
 '''
 
 @jit(forceobj=True)
-def model_run(inpt, W1, W2, W3, W4, b1, b2, b3, b4):
+def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	x = np.matmul(inpt, W1) + b1
 	x = bt.relu(x)		
 	x = np.matmul(x, W2) + b2
 	x = bt.relu(x)		
 	x = np.matmul(x, W3) + b3
 	x = bt.relu(x)
-	x = np.matmul(x, W4) + b4
-	x = bt.sigmoid(x)
 	return x
 
 class BasicDenseModel(object):
@@ -252,7 +250,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [16, 16, 16, 2])
+		return BasicDenseModel(2, [32, 32, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
@@ -316,7 +314,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v1.3.2_10m_4', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.3.2_10m_test_1', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
