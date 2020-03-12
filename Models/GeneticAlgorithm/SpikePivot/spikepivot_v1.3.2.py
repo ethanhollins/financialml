@@ -9,7 +9,6 @@ import numpy as np
 import datetime as dt
 import time
 import pandas as pd
-import tensorflow as tf
 import bt
 import json
 
