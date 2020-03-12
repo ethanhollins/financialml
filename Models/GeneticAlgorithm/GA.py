@@ -314,6 +314,7 @@ class GeneticAlgorithm(object):
 			self.run(generations)
 
 	def run(self, generations=20):
+		start = time.time()
 		for generation in range(generations):
 			train_fit, val_fit = self(gen=generation)
 			self.report(generation, train_fit, val_fit)
@@ -324,7 +325,7 @@ class GeneticAlgorithm(object):
 			else:
 				self.optimize(np.array(train_fit))
 
-		print('Training completed.')
+		print('Training completed. {:.2f}s'.format(time.time() - start))
 
 	def __call__(self, gen=0):
 		train_fit = []
@@ -426,7 +427,7 @@ class GeneticAlgorithm(object):
 			mid = (train_arr + np.array(val_fit)) / 2.0
 			count = 0
 			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
-				if count >= 10:
+				if count >= 5:
 					break
 
 				if i[1] != 0.0:

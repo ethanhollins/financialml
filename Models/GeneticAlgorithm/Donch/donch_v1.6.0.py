@@ -25,7 +25,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,9,1), current=True)
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,9,1), end=dt.datetime(2020,3,1))
 
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -64,6 +64,7 @@ def getDonchUpDown(high, low, period, lookup):
 			x.append(convertToPips(c_high - last_high))
 			x.append(convertToPips(c_low - last_low))
 
+
 			if len(X) > 0:
 				X.append(X[-1][-(lookup-1):] + [x])
 			else:
@@ -72,16 +73,15 @@ def getDonchUpDown(high, low, period, lookup):
 		last_high = c_high
 		last_low = c_low
 
-	print(X[:5])
 	return np.array(X[lookup-1:], dtype=np.float32)
 
 period = 4
 timer = timeit()
 train_data = getDonchUpDown(
-	df.values[:,1],
-	df.values[:,2],
+	df.values[:,5],
+	df.values[:,6],
 	period,
-	10 # lookup
+	5 # lookup
 )
 timer.end()
 
@@ -96,7 +96,7 @@ y_train = df.values[period_off:train_size+period_off].astype(np.float32)
 X_val = train_data[train_size:]
 y_val = df.values[train_size+period_off:].astype(np.float32)
 
-mean = 0
+mean = np.mean(X_train)
 std = np.std(X_train)
 X_train = normalize(X_train, mean, std)
 X_val = normalize(X_val, mean, std)
@@ -144,13 +144,6 @@ class BasicRnnModel(object):
 		self.b.append(
 			np.random.normal(size=(self._layers[0]))
 		)
-
-		# self.W.append(
-		# 	np.random.normal(size=(self._layers[-2], self._layers[-1]))
-		# )
-		# self.b.append(
-		# 	np.random.normal(size=self._layers[-1])
-		# )
 
 		# Hidden Layers
 		for i in range(1, len(self._layers)):
@@ -223,7 +216,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 80.0
+		sl = 30.0
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
@@ -252,7 +245,7 @@ Create Genetic Algorithm
 bt.recompile_all()
 
 crossover = GA.PreserveBestCrossover(preserve_rate=0.5)
-mutation = GA.PreserveBestMutation(mutation_rate=0.02, preserve_rate=0.5)
+mutation = GA.PreserveBestMutation(mutation_rate=0.05, preserve_rate=0.5)
 ga = GA.GeneticAlgorithm(
 	crossover, mutation,
 	survival_rate=0.2

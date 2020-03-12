@@ -80,7 +80,7 @@ class DataLoader(object):
 				if y == start.year:
 					ts_start = self.convertTimeToTimestamp(start)
 					t_data = t_data.loc[t_data['timestamp'] >= ts_start]
-				elif y == end.year:
+				if y == end.year:
 					ts_end = self.convertTimeToTimestamp(end)
 					t_data = t_data.loc[t_data['timestamp'] <= ts_end]
 				frags.append(t_data)

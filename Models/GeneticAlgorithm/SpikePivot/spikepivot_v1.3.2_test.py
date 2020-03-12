@@ -27,7 +27,12 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,3,1), end=dt.datetime(2019,7,1))
+start = dt.datetime(2019,1,1)
+end = dt.datetime(2019,4,1)
+end_ts = dl.convertTimeToTimestamp(end)
+end_test = dt.datetime(2019,6,1)
+
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start, end=end_test)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -138,17 +143,22 @@ def getTrainData(data, timestamps):
 
 timer = timeit()
 train_data = np.array(getTrainData(np.round(df.values[:,4:], decimals=5), df.index.values), dtype=np.float32)
+test_data = np.array(getTrainData(np.round(df.loc[df.index > end_ts].values[:,4:], decimals=5), df.loc[df.index > end_ts].index.values), dtype=np.float32)
 timer.end()
 
 print('Train Data:\n%s\n' % train_data[:5])
 
-train_size = int(df.shape[0] * 0.75)
-period_off = 3
+train_size = int(df.shape[0] * 0.7)
+train_period_off = df.shape[0] - train_data.shape[0]
+test_period_off = df.loc[df.index > end_ts].shape[0] - train_data.shape[0]
 
 X_train = train_data[:train_size]
-y_train = df.values[period_off:train_size+period_off].astype(np.float32)
+y_train = df.values[train_period_off:train_size+train_period_off].astype(np.float32)
 X_val = train_data[train_size:]
-y_val = df.values[train_size+period_off:].astype(np.float32)
+y_val = df.values[train_size+train_period_off:].astype(np.float32)
+
+X_test = test_data
+y_test = df.loc[df.index > end_ts].values[train_period_off:].astype(np.float32)
 
 mean = np.mean(X_train)
 std = np.std(X_train)
@@ -157,6 +167,7 @@ X_val_norm = normalize(X_val, mean, std)
 
 print('Train Data: {} {}'.format(X_train.shape, y_train.shape))
 print('Val Data: {} {}'.format(X_val.shape, y_val.shape))
+print('Test Data: {} {}'.format(X_test.shape, y_test.shape))
 
 '''
 Create Genetic Model
@@ -206,32 +217,24 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		super().__init__()
 		self.threshold = threshold
 
-	def __call__(self, X, y, training=False):
+	def __call__(self, X, y, mode=1):
 		super().__call__(X, y)
-		if training:
-			results = bt.start(
-				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				self._model(X)
-			)
-			results = [
-				results[0], # Return
-				results[4], # Drawdown
-				results[1],	# Gain
-				results[2],	# Loss
-			]
+		results = bt.start(
+			GeneticPlanModel.run, y.astype(np.float32), self.threshold,
+			self._model(X)
+		)
+		results = [
+			results[0], # Return
+			results[4], # Drawdown
+			results[1],	# Gain
+			results[2],	# Loss
+		]
+		if mode == 0:
 			self.train_results = results
-		else:
-			results = bt.start(
-				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				self._model(X)
-			)
-			results = [
-				results[0], # Return
-				results[4], # Drawdown
-				results[1],	# Gain
-				results[2],	# Loss
-			]
+		elif mode == 1:
 			self.val_results = results
+		elif mode == 2:
+			self.test_results = results
 		return self.getPerformance(*results)
 
 	def getPerformance(self, ret, dd, gain, loss):
@@ -265,13 +268,16 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			(self.train_results[2] / self.train_results[3]) if self.train_results[3] != 0 else 0,
 			self.getPerformance(*self.val_results),
 			self.val_results[0], self.val_results[1],
-			(self.val_results[2] / self.val_results[3]) if self.val_results[3] != 0 else 0
+			(self.val_results[2] / self.val_results[3]) if self.val_results[3] != 0 else 0,
+			# self.getPerformance(*self.test_results),
+			# self.test_results[0], self.test_results[1],
+			# (self.test_results[2] / self.test_results[3]) if self.test_results[3] != 0 else 0
 		)
 
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 80.0
+		sl = 130.0
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
@@ -296,15 +302,16 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 Run Saved Model
 '''
 
-for i in range(5):
+for i in range(10):
 	gpm = GeneticPlanModel(threshold=0.5)
-	with open('./saved/v1.3.2_0/{}.json'.format(i), 'r') as f:
+	with open('./saved/v1.3.2_1/{}.json'.format(i), 'r') as f:
 		info = json.load(f)
 		weights = [np.array(i, dtype=np.float32) for i in info['weights']]
 
 	gpm.setModel(gpm.generateModel(None))
 	gpm.setWeights(weights)
 
-	print(gpm(X_train_norm, y_train, training=True))
-	print(gpm(X_val_norm, y_val))
+	print(gpm(X_train_norm, y_train, mode=0))
+	print(gpm(X_val_norm, y_val, mode=1))
+	# print(gpm(X_test, y_test, mode=2))
 	print(gpm)

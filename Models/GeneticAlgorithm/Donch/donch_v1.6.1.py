@@ -26,7 +26,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,5,1), end=dt.datetime(2019,11,1))
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,9,1), end=dt.datetime(2020,3,1))
 
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -73,20 +73,19 @@ def getDonchUpDown(high, low, period, lookup):
 		last_high = c_high
 		last_low = c_low
 
-	print(X[:5])
 	return np.array(X[lookup-1:], dtype=np.float32)
 
 period = 4
 timer = timeit()
 train_data = getDonchUpDown(
-	df.values[:,1],
-	df.values[:,2],
+	df.values[:,5],
+	df.values[:,6],
 	period,
 	5 # lookup
 )
 timer.end()
 
-print('Donch Data:\n%s'%train_data[:5])
+print('Donch Data:\n%s'%train_data[:2])
 print(train_data.shape)
 
 train_size = int(df.shape[0] * 0.7)
@@ -97,7 +96,7 @@ y_train = df.values[period_off:train_size+period_off].astype(np.float32)
 X_val = train_data[train_size:]
 y_val = df.values[train_size+period_off:].astype(np.float32)
 
-mean = 0
+mean = np.mean(X_train)
 std = np.std(X_train)
 X_train = normalize(X_train, mean, std)
 X_val = normalize(X_val, mean, std)
@@ -114,7 +113,7 @@ def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	for i in range(inpt.shape[1]):
 		c_i = inpt[:,i,:]
 		c_i = c_i.reshape(c_i.shape[0], 1, c_i.shape[1])
-		x = np.matmul(c_i, W1) + b1
+		x = np.matmul(c_i, W1)
 		x = bt.relu(x)
 
 		if i+1 == inpt.shape[1]:
@@ -191,7 +190,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return ret - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicRnnModel(X_train.shape, [32, 16, 2])
+		return BasicRnnModel(X_train.shape, [16, 16, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.threshold)
@@ -220,7 +219,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 80.0
+		sl = 55.0
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
@@ -258,6 +257,7 @@ ga = GA.GeneticAlgorithm(
 ga.setSeed(1)
 # ga.save(16, 1552, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
 # ga.save(16, 2, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.6.1', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -270,7 +270,7 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train, y_train),
 	val_data=(X_val, y_val),
-	generations=30
+	generations=50
 )
 
 

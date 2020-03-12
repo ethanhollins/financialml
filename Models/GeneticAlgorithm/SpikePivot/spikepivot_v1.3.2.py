@@ -27,7 +27,12 @@ Data Preprocessing
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=dt.datetime(2019,1,1), end=dt.datetime(2019,6,1))
+start_data = dt.datetime(2018,10,1)
+start = dt.datetime(2019,1,1)
+start_ts = dl.convertTimeToTimestamp(start)
+end = dt.datetime(2019,6,1)
+
+df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -139,16 +144,18 @@ def getTrainData(data, timestamps):
 timer = timeit()
 train_data = np.array(getTrainData(np.round(df.values[:,4:], decimals=5), df.index.values), dtype=np.float32)
 timer.end()
+train_data_off = train_data.shape[0] - df.loc[df.index >= start_ts].values.shape[0]
+train_data = train_data[train_data_off:]
 
 print('Train Data:\n%s\n' % train_data[:5])
 
-train_size = int(df.shape[0] * 0.7)
+train_size = int(train_data.shape[0] * 0.3)
 period_off = 3
 
 X_train = train_data[:train_size]
-y_train = df.values[period_off:train_size+period_off].astype(np.float32)
+y_train = df.values[train_data_off+period_off:train_data_off+period_off+train_size].astype(np.float32)
 X_val = train_data[train_size:]
-y_val = df.values[train_size+period_off:].astype(np.float32)
+y_val = df.values[train_data_off+period_off+train_size:].astype(np.float32)
 
 mean = np.mean(X_train)
 std = np.std(X_train)
@@ -244,7 +251,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [16, 16, 2])
+		return BasicDenseModel(2, [32, 32, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
@@ -308,11 +315,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.save(44, 706, 'v1.3.2_0', {'mean': float(mean), 'std': float(std)})
-ga.save(44, 36, 'v1.3.2_0', {'mean': float(mean), 'std': float(std)})
-ga.save(44, 17, 'v1.3.2_0', {'mean': float(mean), 'std': float(std)})
-ga.save(44, 5, 'v1.3.2_0', {'mean': float(mean), 'std': float(std)})
-ga.save(44, 32, 'v1.3.2_0', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.3.2_10m_3', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -325,7 +328,7 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),
 	val_data=(X_val_norm, y_val),
-	generations=50
+	generations=100
 )
 
 
