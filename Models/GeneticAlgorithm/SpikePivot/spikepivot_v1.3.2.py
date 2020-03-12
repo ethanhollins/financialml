@@ -169,12 +169,14 @@ Create Genetic Model
 '''
 
 @jit(forceobj=True)
-def model_run(inpt, W1, W2, W3, b1, b2, b3):
+def model_run(inpt, W1, W2, W3, W4, b1, b2, b3, b4):
 	x = np.matmul(inpt, W1) + b1
 	x = bt.relu(x)		
 	x = np.matmul(x, W2) + b2
 	x = bt.relu(x)		
 	x = np.matmul(x, W3) + b3
+	x = bt.relu(x)
+	x = np.matmul(x, W4) + b4
 	x = bt.sigmoid(x)
 	return x
 
@@ -250,7 +252,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [32, 32, 2])
+		return BasicDenseModel(2, [16, 16, 16, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
@@ -314,7 +316,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v1.3.2_10m_3', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.3.2_10m_4', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -327,7 +329,7 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),
 	val_data=(X_val_norm, y_val),
-	generations=100
+	generations=50
 )
 
 
