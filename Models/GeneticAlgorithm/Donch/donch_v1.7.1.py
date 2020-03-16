@@ -18,14 +18,13 @@ class timeit(object):
 	def end(self):
 		print('Timer module finished %.2f'%(time.time() - self.start))
 
-
 '''
 Data Preprocessing
 '''
 
 dl = DataLoader()
 
-df = dl.get(Constants.GBPUSD, Constants.THIRTY_MINUTES, start=dt.datetime(2019,1,1), end=dt.datetime(2019,6,1))
+df = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=dt.datetime(2018,6,1), end=dt.datetime(2019,6,1))
 
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -80,7 +79,7 @@ train_data = getDonchUpDown(
 	df.values[:,5],
 	df.values[:,6],
 	period,
-	5 # lookup
+	2 # lookup
 )
 timer.end()
 
@@ -189,7 +188,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return ret - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicRnnModel(X_train.shape, [16, 16, 2])
+		return BasicRnnModel(X_train.shape, [16, 16, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(self.threshold)
@@ -223,10 +222,14 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0, sl)
+			elif out[i][3] > threshold:
+				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		elif c_dir == bt.SELL:
 			if out[i][1] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0, sl)
+			elif out[i][2] > threshold:
+				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		else:
 			if out[i][0] > out[i][1]:
@@ -256,7 +259,7 @@ ga = GA.GeneticAlgorithm(
 ga.setSeed(1)
 # ga.save(16, 1552, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
 # ga.save(16, 2, 'v1.3.1', {'mean': float(mean), 'std': float(std)})
-ga.saveBest(10, 'v1.7.0_4', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.7.1_4h_1y', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []

@@ -26,10 +26,10 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start_data = dt.datetime(2018,7,1)
-start = dt.datetime(2018,9,1)
+start_data = dt.datetime(2018,10,1)
+start = dt.datetime(2019,1,1)
 start_ts = dl.convertTimeToTimestamp(start)
-end = dt.datetime(2019,4,1)
+end = dt.datetime(2019,6,1)
 
 df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
@@ -250,7 +250,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [32, 32, 2])
+		return BasicDenseModel(2, [32, 32, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
@@ -284,10 +284,14 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0, sl)
+			elif out[i][3] > threshold:
+				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		elif c_dir == bt.SELL:
 			if out[i][1] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0, sl)
+			elif out[i][2] > threshold:
+				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		else:
 			if out[i][0] > out[i][1]:
@@ -314,7 +318,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v1.3.2_10m_test_4', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.5.0_10m', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
