@@ -26,10 +26,10 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start_data = dt.datetime(2018,7,1)
-start = dt.datetime(2018,9,1)
+start_data = dt.datetime(2019,6,1)
+start = dt.datetime(2019,8,1)
 start_ts = dl.convertTimeToTimestamp(start)
-end = dt.datetime(2019,4,1)
+end = dt.datetime(2020,1,1)
 
 df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
@@ -148,7 +148,7 @@ train_data = train_data[train_data_off:]
 
 print('Train Data:\n%s\n' % train_data[:5])
 
-train_size = int(train_data.shape[0] * 0.3)
+train_size = int(train_data.shape[0] * 0.7)
 period_off = 3
 
 X_train = train_data[:train_size]
@@ -314,7 +314,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v1.3.2_10m_test_4', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.3.2_10m_010619_70p_4m', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []

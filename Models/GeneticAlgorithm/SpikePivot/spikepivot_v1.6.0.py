@@ -26,12 +26,12 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start_data = dt.datetime(2018,10,1)
-start = dt.datetime(2019,1,1)
+start_data = dt.datetime(2019,4,1)
+start = dt.datetime(2019,6,1)
 start_ts = dl.convertTimeToTimestamp(start)
-end = dt.datetime(2019,6,1)
+end = dt.datetime(2020,1,1)
 
-df = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start_data, end=end)
+df = dl.get(Constants.GBPUSD, Constants.THIRTY_MINUTES, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -328,7 +328,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v1.6.0_10m_20g', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v1.6.0_30m_010619', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []

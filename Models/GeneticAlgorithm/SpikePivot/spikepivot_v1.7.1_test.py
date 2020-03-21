@@ -26,12 +26,14 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start_data = dt.datetime(2019,4,1)
-start = dt.datetime(2019,6,1)
+start_data = dt.datetime(2017,10,1)
+start = dt.datetime(2018,1,1)
 start_ts = dl.convertTimeToTimestamp(start)
-end = dt.datetime(2020,1,1)
+end = dt.datetime(2019,1,1)
 
-df = dl.get(Constants.GBPUSD, Constants.THIRTY_MINUTES, start=start_data, end=end)
+data_split = 0.5
+
+df = dl.get(Constants.GBPUSD, Constants.DAILY, start=start_data, end=end)
 # df.values[:,:4] = df[['bid_open', 'bid_high', 'bid_low', 'bid_close']].values
 # Visualize data
 print('\nData:\n%s'%df.head(5))
@@ -148,7 +150,7 @@ train_data = train_data[train_data_off:]
 
 print('Train Data:\n%s\n' % train_data[:5])
 
-train_size = int(train_data.shape[0] * 0.5)
+train_size = int(train_data.shape[0] * data_split)
 period_off = 3
 
 X_train = train_data[:train_size]
@@ -175,7 +177,18 @@ def model_run(inpt, W1, W2, W3, b1, b2, b3):
 	x = np.matmul(x, W2) + b2
 	x = bt.relu(x)		
 	x = np.matmul(x, W3) + b3
-	x = bt.sigmoid(x)
+
+	x[:,:2] = bt.sigmoid(x[:,:2])
+
+	t_x = np.copy(x[:,2])
+	x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
+	x[:,2] = np.sum(x[:,2])/x[:,2].size
+	x[:,2] *= (250-30) + 30
+	
+	t_x = np.copy(x[:,3])
+	x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
+	x[:,3] = np.sum(x[:,3])/x[:,3].size
+	x[:,3] *= (250-30) + 30
 	return x
 
 class BasicDenseModel(object):
@@ -208,10 +221,8 @@ class BasicDenseModel(object):
 		return model_run(inpt, *self.W, *self.b)
 
 class GeneticPlanModel(GA.GeneticAlgorithmModel):
-	def __init__(self, train_data, val_data, threshold=0.5):
+	def __init__(self, threshold=0.5):
 		super().__init__()
-		self.train_data = train_data
-		self.val_data = val_data
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
@@ -244,16 +255,16 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def getPerformance(self, ret, dd, gain, loss):
 		if loss == 0:
-			gpr = 0.0
+			gpr = 10.0
 		else:
 			gpr = (gain / loss) + 1
-		return (ret) - pow(max(dd-3, 0), 2) - pow(max(gpr-3,0), 2)
+		return (ret) - pow(max(dd-2, 0), 2) - pow(max(gpr-2,0), 2)
 
 	def generateModel(self, model_info):
 		return BasicDenseModel(2, [32, 32, 4])
 
 	def newModel(self):
-		return GeneticPlanModel(self.train_data, self.val_data, self.threshold)
+		return GeneticPlanModel(self.threshold)
 
 	def getWeights(self):
 		return (
@@ -279,19 +290,20 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, positions, ohlc, result, data, threshold, out):
 		c_dir = bt.get_direction(positions, 0)
-		sl = 80.0
+		sl = 100.0
+		tp_increment = 61.0
+		# sl = min(max(out[i][2], 30), 250)
+		# tp_increment = min(max(out[i][3], 30), 250)
+		# print(sl)
+		# print(tp_increment)
 
 		if c_dir == bt.BUY:
 			if out[i][0] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.SELL, sl, 0, sl)
-			elif out[i][3] > threshold:
-				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		elif c_dir == bt.SELL:
 			if out[i][1] > threshold:
 				positions, result = bt.stop_and_reverse(positions, ohlc[i], result, bt.BUY, sl, 0, sl)
-			elif out[i][2] > threshold:
-				positions, result = bt.close_position(positions, 0, ohlc[i], result)
 
 		else:
 			if out[i][0] > out[i][1]:
@@ -302,36 +314,31 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 				if out[i][1] > threshold:
 					positions = bt.create_position(positions, ohlc[i], bt.BUY, sl, 0, sl)
 
+		if bt.get_num_positions(positions) > 0:
+			pos_sl = bt.get_sl(positions, 0)
+			profit = bt.get_profit(positions, 0, ohlc[i])
+			profit_multi = np.floor(profit/tp_increment)
+			new_sl = -tp_increment * (profit_multi-1)
+			if pos_sl > new_sl:
+				if -new_sl >= tp_increment*2:
+					positions = bt.modify_sl(positions, 0, new_sl)
+				elif -new_sl >= tp_increment*1.5:
+					positions = bt.modify_sl(positions, 0, 0)
+
 		return positions, result, data
 		
 '''
-Create Genetic Algorithm
+Run Saved Model
 '''
 
-bt.recompile_all()
+gpm = GeneticPlanModel(threshold=0.5)
+with open('./saved/v1.7.1_d_18_50g/0.json', 'r') as f:
+	info = json.load(f)
+	weights = [np.array(i, dtype=np.float32) for i in info['weights']]
 
-crossover = GA.PreserveBestCrossover(preserve_rate=0.5)
-mutation = GA.PreserveBestMutation(mutation_rate=0.02, preserve_rate=0.5)
-ga = GA.GeneticAlgorithm(
-	crossover, mutation,
-	survival_rate=0.2
-)
+gpm.setModel(gpm.generateModel(None))
+gpm.setWeights(weights)
 
-ga.setSeed(1)
-ga.saveBest(10, 'v1.5.0_30m_010619_50p', {'mean': float(mean), 'std': float(std)})
-
-def generate_models(num_models):
-	models = []
-	for i in range(num_models):
-		models.append(GeneticPlanModel(X_train, X_val, threshold=0.5))
-	return models
-
-num_models = 5000
-ga.fit(
-	models=generate_models(num_models),
-	train_data=(X_train_norm, y_train),
-	val_data=(X_val_norm, y_val),
-	generations=50
-)
-
-
+print(gpm(X_train_norm, y_train, training=True))
+print(gpm(X_val_norm, y_val, training=False))
+print(gpm)

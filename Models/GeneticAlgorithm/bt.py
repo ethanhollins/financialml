@@ -38,30 +38,42 @@ def del_position(positions, i):
 	return positions
 
 @jit
-def close_position(positions, i, ohlc, result):
+def close_position(positions, i, ohlc, result, stats):
 	pos = positions[i]
 	if pos[0] == BUY:
-		result += convertToPips(ohlc[7] - pos[1]) / pos[4]
+		profit = convertToPips(ohlc[7] - pos[1]) / pos[4]
+		if profit >= 0:
+			stats[5] += 1
+		else:
+			stats[6] += 1
+		result += profit
+
 	elif pos[0] == SELL:
-		result += convertToPips(pos[1] - ohlc[3]) / pos[4]
+		profit = convertToPips(pos[1] - ohlc[3]) / pos[4]
+		if profit >= 0:
+			stats[5] += 1
+		else:
+			stats[6] += 1
+		result += profit
+
 	positions = del_position(positions, i)
 	return positions, result
 
 @jit
-def close_all(positions, ohlc, result):
+def close_all(positions, ohlc, result, stats):
 	i = 0
 	while i < positions.shape[0]:
 		if positions[i][0] == 0:
 			return positions, result
 		else:
-			positions, result = close_position(positions, i, ohlc, result)
+			positions, result = close_position(positions, i, ohlc, result, stats)
 			continue
 		i += 1
 	return positions, result
 
 @jit
-def stop_and_reverse(positions, ohlc, result, direction, sl, tp, risk):
-	positions, result = close_all(positions, ohlc, result)
+def stop_and_reverse(positions, ohlc, result, stats, direction, sl, tp, risk):
+	positions, result = close_all(positions, ohlc, result, stats)
 	positions = create_position(positions, ohlc, direction, sl, tp, risk)
 	return positions, result
 
@@ -100,6 +112,10 @@ def modify_tp(positions, i, tp):
 	return positions
 
 @jit
+def get_risk(positions, i):
+	return positions[i][4]
+
+@jit
 def get_profit(positions, i, ohlc):
 	pos = positions[i]
 	if pos[0] == BUY:
@@ -118,7 +134,7 @@ def get_total_profit(positions, ohlc):
 	return profit
 
 @jit
-def check_sl(positions, ohlc, result):
+def check_sl(positions, ohlc, result, stats):
 	i = 0
 	while i < positions.shape[0]:
 		pos = positions[i]
@@ -129,12 +145,25 @@ def check_sl(positions, ohlc, result):
 			continue
 		elif pos[0] == BUY:
 			if convertToPips(ohlc[6] - pos[1]) <= -pos[2]:
-				result += -1.0
+				profit = -(pos[2]/pos[4])
+				if profit >= 0:
+					stats[5] += 1
+				else:
+					stats[6] += 1
+
+				result += profit
 				positions = del_position(positions, i)
 				continue
+
 		elif pos[0] == SELL:
 			if convertToPips(pos[1] - ohlc[1]) <= -pos[2]:
-				result += -1.0
+				profit = -(pos[2]/pos[4])
+				if profit >= 0:
+					stats[5] += 1
+				else:
+					stats[6] += 1
+
+				result += profit
 				positions = del_position(positions, i)
 				continue
 		i+=1
@@ -142,7 +171,7 @@ def check_sl(positions, ohlc, result):
 
 
 @jit
-def check_tp(positions, ohlc, result):
+def check_tp(positions, ohlc, result, stats):
 	i = 0
 	while i < positions.shape[0]:
 		pos = positions[i]
@@ -153,12 +182,24 @@ def check_tp(positions, ohlc, result):
 			continue
 		elif pos[0] == BUY:
 			if convertToPips(ohlc[5] - pos[1]) >= pos[3]:
-				result += pos[3] / pos[4]
+				profit = pos[3] / pos[4]
+				if profit >= 0:
+					stats[5] += 1
+				else:
+					stats[6] += 1
+
+				result += profit
 				positions = del_position(positions, i)
 				continue
 		elif pos[0] == SELL:
 			if convertToPips(pos[1] - ohlc[2]) >= pos[3]:
-				result += pos[3] / pos[4]
+				profit = pos[3] / pos[4]
+				if profit >= 0:
+					stats[5] += 1
+				else:
+					stats[6] += 1
+
+				result += profit
 				positions = del_position(positions, i)
 				continue
 		i+=1
@@ -179,6 +220,8 @@ def get_stats(stats, result, prev_result):
 		stats[3] = result # Max Return
 	elif (stats[3] - result) > stats[4]:
 		stats[4] = (stats[3] - result) # Drawdown
+	# 5 - wins
+	# 6 - losses
 
 	return stats
 
@@ -186,17 +229,17 @@ def get_stats(stats, result, prev_result):
 def start(runloop, ohlc, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
-	stats = np.zeros((5,), dtype=np.float32)
+	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
 
 	for i in range(ohlc.shape[0]):
 		prev_result = result
 
-		positions, result = check_sl(positions, ohlc[i], result)
-		positions, result = check_tp(positions, ohlc[i], result)
+		positions, result = check_sl(positions, ohlc[i], result, stats)
+		positions, result = check_tp(positions, ohlc[i], result, stats)
 
-		positions, result, data = runloop(i, positions, ohlc, result, data, *args)
+		positions, result, data, stats = runloop(i, positions, ohlc, result, data, stats, *args)
 
 		stats = get_stats(stats, result, prev_result)
 
@@ -205,17 +248,17 @@ def start(runloop, ohlc, *args):
 def step(runloop, ohlc, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
-	stats = np.zeros((5,), dtype=np.float32)
+	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
 
 	for i in range(ohlc.shape[0]):
 		prev_result = result
 
-		positions, result = check_sl(positions, ohlc[i], result)
-		positions, result = check_tp(positions, ohlc[i], result)
+		positions, result = check_sl(positions, ohlc[i], result, stats)
+		positions, result = check_tp(positions, ohlc[i], result, stats)
 
-		positions, result, data = runloop(i, positions, ohlc, result, data, *args)
+		positions, result, data, stats = runloop(i, positions, ohlc, result, data, stats, *args)
 
 		stats = get_stats(stats, result, prev_result)
 
