@@ -225,40 +225,44 @@ def get_stats(stats, result, prev_result):
 
 	return stats
 
-@jit#(forceobj=True)
-def start(runloop, ohlc, *args):
+@jit
+def start(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
 	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
 
-	for i in range(ohlc.shape[0]):
+	for i in range(charts.shape[1]):
 		prev_result = result
 
-		positions, result = check_sl(positions, ohlc[i], result, stats)
-		positions, result = check_tp(positions, ohlc[i], result, stats)
+		positions, result = check_sl(positions, charts[-1][i], result, stats)
+		positions, result = check_tp(positions, charts[-1][i], result, stats)
 
-		positions, result, data, stats = runloop(i, positions, ohlc, result, data, stats, *args)
+		for j in range(charts.shape[0]):
+			if np.any(charts[j][i] != 0):
+				positions, result, data, stats = runloop(i, positions, charts[j], result, data, stats, *args)
 
 		stats = get_stats(stats, result, prev_result)
 
 	return stats
 
-def step(runloop, ohlc, *args):
+def step(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
 	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
 
-	for i in range(ohlc.shape[0]):
+	for i in range(charts.shape[1]):
 		prev_result = result
 
-		positions, result = check_sl(positions, ohlc[i], result, stats)
-		positions, result = check_tp(positions, ohlc[i], result, stats)
+		positions, result = check_sl(positions, charts[-1][i], result, stats)
+		positions, result = check_tp(positions, charts[-1][i], result, stats)
 
-		positions, result, data, stats = runloop(i, positions, ohlc, result, data, stats, *args)
+		for j in range(charts.shape[0]):
+			if np.any(charts[j][i] != 0):
+				positions, result, data, stats = runloop(i, positions, charts[j], result, data, stats, *args)
 
 		stats = get_stats(stats, result, prev_result)
 
