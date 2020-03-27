@@ -241,7 +241,7 @@ def start(runloop, charts, *args):
 
 		for j in range(charts.shape[0]):
 			if np.any(charts[j][i] != 0):
-				positions, result, data, stats = runloop(i, positions, charts[j], result, data, stats, *args)
+				positions, result, data, stats = runloop(i, j, positions, charts, result, data, stats, *args)
 
 		stats = get_stats(stats, result, prev_result)
 

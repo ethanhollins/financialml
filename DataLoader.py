@@ -93,6 +93,7 @@ class DataLoader(object):
 			if not end:
 				end = datetime.datetime.now()
 			data = self._oandaDownload(product, period, start_dt=start, end_dt=end)
+			data = data[~data.index.duplicated(keep='first')]
 
 			if save:
 				self.save(data, product, period, start, end)
@@ -210,6 +211,36 @@ class DataLoader(object):
 			return start_dt + datetime.timedelta(hours=count*24) >= end_dt
 		else:
 			raise Exception('Period not found.')
+
+	def getPeriodOffsetSeconds(self, period):
+		if period == Constants.ONE_MINUTE:
+			return 60*1
+		elif period == Constants.TWO_MINUTES:
+			return 60*2
+		elif period == Constants.THREE_MINUTES:
+			return 60*3
+		elif period == Constants.FIVE_MINUTES:
+			return 60*5
+		elif period == Constants.FIFTEEN_MINUTES:
+			return 60*15
+		elif period == Constants.THIRTY_MINUTES:
+			return 60*30
+		elif period == Constants.ONE_HOUR:
+			return 60*60
+		elif period == Constants.TWO_HOURS:
+			return 60*60*2
+		elif period == Constants.THREE_HOURS:
+			return 60*60*3
+		elif period == Constants.FOUR_HOURS:
+			return 60*60*4
+		elif period == Constants.DAILY:
+			return 60*60*24
+		elif period == Constants.WEEKLY:
+			return 60*60*24*7
+		elif period == Constants.MONTHLY:
+			return 60*60*24*7*4
+		else:
+			None
 
 	def convertTimezone(self, dt, tz):
 		return dt.astimezone(pytz.timezone(tz))
