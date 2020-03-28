@@ -26,8 +26,8 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2019,1,1)
-end = dt.datetime(2020,1,1)
+start = dt.datetime(2020,1,3)
+end = dt.datetime(2020,3,1)
 
 data_split = 0.7
 stoprange = 200.0
@@ -242,8 +242,6 @@ print('Train Plan Data: {}\n{}'.format(X_train_plan.shape, X_train_plan[:5]))
 print('\nVal Data: {} {} H4: {}'.format(X_val.shape, y_val.shape, num_val_h4))
 print('Val Plan Data: {}\n{}'.format(X_val_plan.shape, X_val_plan[:5]))
 
-raise SystemExit()
-
 '''
 Create Genetic Model
 '''
@@ -298,7 +296,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		super().__call__(X, y)
 		
 		if training:
-			results = bt.start(
+			results = bt.step(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
 				self._model(X), self.X_train_plan
 			)
@@ -377,7 +375,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			(self.val_results[4] + self.val_results[5])
 		)
 
-	@jit
+	# @jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		sl = 80.0
 		tp_increment = 55.0
@@ -385,20 +383,43 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 		# H4
 		if j == 0:
+			print('idx: {}'.format(int(data[0])))
+			print('ts: {}'.format(
+				dl.convertTimestampToTime(df_h4.index[int(data[0])])
+			))
+			print('OHLC: {}'.format(charts[j][i]))
+			print('Plan Data: {}\n'.format(plan[int(data[0])]))
+
+			if plan[int(data[0])][0] == 0:
+				data[1] = 0
+			if plan[int(data[0])][1] == 0:
+				data[2] = 0
+
+			print('Data: {}'.format(data[:3]))
 			# BUY Signal
-			if plan[data[0]][0] != 0 and charts[j][i][7] > plan[data[0]][0]:
-				if c_dir == bt.SELL:
-					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl)
-				elif c_dir == 0:
-					positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl)
+			if plan[int(data[0])][0] != 0 and charts[j][i][7] > plan[int(data[0])][0]:
+				if plan[int(data[0])][0] != data[1]:
+					if c_dir == bt.SELL:
+						print('BUY (S&R)')
+						positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl)
+					elif c_dir == 0:
+						print('BUY (REG)')
+						positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl)
+				data[1] = plan[int(data[0])][0]
 
 			# SELL Signal
-			elif plan[data[0]][1] != 0 and charts[j][i][7] < plan[data[0]][1]:
-				if c_dir == bt.BUY:
-					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl)
-				elif c_dir == 0:
-					positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl)
+			elif plan[int(data[0])][1] != 0 and charts[j][i][7] < plan[int(data[0])][1]:
+				if plan[int(data[0])][1] != data[2]:
+					if c_dir == bt.BUY:
+						print('SELL (S&R)')
+						positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl)
+					elif c_dir == 0:
+						print('SELL (REG)')
+						positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl)
+				data[2] = plan[int(data[0])][1]
 
+			print('Position: {}'.format(positions[0]))
+			print('Result: {}'.format(result))
 			data[0] += 1
 
 		# M5
@@ -432,33 +453,14 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return positions, result, data, stats
 		
 '''
-Create Genetic Algorithm
+Run Saved Model
 '''
 
-bt.recompile_all()
+gpm = GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5)
+gpm.setModel(gpm.generateModel(None))
 
-crossover = GA.PreserveBestCrossover(preserve_rate=0.5)
-mutation = GA.PreserveBestMutation(mutation_rate=0.02, preserve_rate=0.5)
-ga = GA.GeneticAlgorithm(
-	crossover, mutation,
-	survival_rate=0.2
-)
-
-ga.setSeed(1)
-ga.saveBest(10, 'v2.0.0', {'mean': float(mean), 'std': float(std)})
-
-def generate_models(num_models):
-	models = []
-	for i in range(num_models):
-		models.append(GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5))
-	return models
-
-num_models = 5000
-ga.fit(
-	models=generate_models(num_models),
-	train_data=(X_train_norm, y_train),
-	val_data=(X_val_norm, y_val),
-	generations=100
-)
-
-
+print(gpm(X_train_norm, y_train, training=True))
+print(gpm(X_val_norm, y_val, training=False))
+print(gpm)
+print(gpm.train_results)
+print(gpm.val_results)

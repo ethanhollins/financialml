@@ -225,7 +225,7 @@ def get_stats(stats, result, prev_result):
 
 	return stats
 
-@jit
+# @jit
 def start(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
@@ -262,11 +262,11 @@ def step(runloop, charts, *args):
 
 		for j in range(charts.shape[0]):
 			if np.any(charts[j][i] != 0):
-				positions, result, data, stats = runloop(i, positions, charts[j], result, data, stats, *args)
+				positions, result, data, stats = runloop(i, j, positions, charts, result, data, stats, *args)
+				if j == 0:
+					input('--|\n')
 
 		stats = get_stats(stats, result, prev_result)
-
-		input('--|\n')
 
 	return stats
 
