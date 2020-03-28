@@ -26,7 +26,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2020,1,3)
+start = dt.datetime(2019,1,1)
 end = dt.datetime(2020,3,1)
 
 data_split = 0.7
@@ -79,11 +79,11 @@ def isShortSpike(data, threshold):
 	return True
 
 # @jit
-def getTrainData(data):
+def getTrainData(data, timestamps):
 	spike_threshold = 1.0
 	lookback = 3
 	out_data = np.array([[0,0],[0,0]], dtype=np.float32) # LONG DIST, SHORT DIST
-	plan_data = np.array([0,0], dtype=np.float32)
+	plan_data = np.array([0,0,0], dtype=np.float32)
 
 	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
 	ad_data = [0,0,0,0, max(data[:lookback,1]), min(data[:lookback,2])] 
@@ -112,6 +112,8 @@ def getTrainData(data):
 			ad_data[0] = data[i-s_idx, 1]
 			ad_data[1] = ad_data[5]
 
+			ad_data[5] = min(data[i-s_idx, 2], data[i, 2])
+
 			body = convertToPips(data[i-s_idx, 3] - data[i-s_idx, 0])
 
 			if body >= 0:
@@ -130,6 +132,8 @@ def getTrainData(data):
 			ad_data[2] = data[i-s_idx, 2]
 			ad_data[3] = ad_data[4]
 
+			ad_data[4] = max(data[i-s_idx, 1], data[i, 1])
+
 			body = convertToPips(data[i-s_idx, 0] - data[i-s_idx, 3])
 
 			if body >= 0:
@@ -143,13 +147,23 @@ def getTrainData(data):
 		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
 		ad_data[5] = data[i,2] if data[i,2] < ad_data[5] else ad_data[5]
 
+		time = dl.convertTimestampToTime(timestamps[i])
+		time = dl.convertTimezone(time, 'Europe/London')
+		if time.weekday() == 4 and time.hour >= 16:
+			plan_data[2] = 0
+		else:
+			plan_data[2] = 1
+
 		X_out.append(out_data)
 		X_plan.append(plan_data)
 
 	return X_out, X_plan
 
 timer = timeit()
-train_data, plan_data = getTrainData(np.round(df_h4.values[:,4:], decimals=5))
+train_data, plan_data = getTrainData(
+	np.round(df_h4.values[:,4:], decimals=5),
+	df_h4.index.values
+)
 train_data = np.array(train_data, dtype=np.float32)
 plan_data = np.array(plan_data, dtype=np.float32)
 timer.end()
@@ -296,7 +310,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		super().__call__(X, y)
 		
 		if training:
-			results = bt.step(
+			results = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
 				self._model(X), self.X_train_plan
 			)
@@ -378,48 +392,51 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	# @jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		sl = 80.0
+		risk = 2.0
 		tp_increment = 55.0
 		c_dir = bt.get_direction(positions, 0)
 
 		# H4
 		if j == 0:
-			print('idx: {}'.format(int(data[0])))
-			print('ts: {}'.format(
-				dl.convertTimestampToTime(df_h4.index[int(data[0])])
-			))
-			print('OHLC: {}'.format(charts[j][i]))
-			print('Plan Data: {}\n'.format(plan[int(data[0])]))
+			# print('idx: {}'.format(int(data[0])))
+			# print('ts: {}'.format(
+			# 	dl.convertTimestampToTime(df_h4.index[(period_off-1) + int(data[0])])
+			# ))
+			# print('OHLC: {}'.format(charts[j][i][4:]))
+			# print('Plan Data: {}\n'.format(plan[int(data[0])]))
 
 			if plan[int(data[0])][0] == 0:
 				data[1] = 0
 			if plan[int(data[0])][1] == 0:
 				data[2] = 0
 
-			print('Data: {}'.format(data[:3]))
-			# BUY Signal
-			if plan[int(data[0])][0] != 0 and charts[j][i][7] > plan[int(data[0])][0]:
-				if plan[int(data[0])][0] != data[1]:
-					if c_dir == bt.SELL:
-						print('BUY (S&R)')
-						positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl)
-					elif c_dir == 0:
-						print('BUY (REG)')
-						positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl)
-				data[1] = plan[int(data[0])][0]
+			# print('Data: {}'.format(data[:3]))
 
-			# SELL Signal
-			elif plan[int(data[0])][1] != 0 and charts[j][i][7] < plan[int(data[0])][1]:
-				if plan[int(data[0])][1] != data[2]:
-					if c_dir == bt.BUY:
-						print('SELL (S&R)')
-						positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl)
-					elif c_dir == 0:
-						print('SELL (REG)')
-						positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl)
-				data[2] = plan[int(data[0])][1]
+			if int(data[0]) > 0 and plan[int(data[0])][2] == 1:
+				# BUY Signal
+				if plan[int(data[0])-1][0] != 0 and charts[j][i][7] > plan[int(data[0])-1][0]:
+					if plan[int(data[0])-1][0] != data[1]:
+						if c_dir == bt.SELL:
+							# print('BUY (S&R)')
+							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+						elif c_dir == 0:
+							# print('BUY (REG)')
+							positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+					data[1] = plan[int(data[0])-1][0]
 
-			print('Position: {}'.format(positions[0]))
-			print('Result: {}'.format(result))
+				# SELL Signal
+				elif plan[int(data[0])-1][1] != 0 and charts[j][i][7] < plan[int(data[0])-1][1]:
+					if plan[int(data[0])-1][1] != data[2]:
+						if c_dir == bt.BUY:
+							# print('SELL (S&R)')
+							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+						elif c_dir == 0:
+							# print('SELL (REG)')
+							positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+					data[2] = plan[int(data[0])-1][1]
+
+			# print('Position: {}'.format(positions[0]))
+			# print('Result: {}'.format(result))
 			data[0] += 1
 
 		# M5
@@ -453,7 +470,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return positions, result, data, stats
 		
 '''
-Run Saved Model
+Benchmark Model
 '''
 
 gpm = GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5)

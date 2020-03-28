@@ -133,7 +133,7 @@ def get_total_profit(positions, ohlc):
 
 	return profit
 
-@jit
+# @jit
 def check_sl(positions, ohlc, result, stats):
 	i = 0
 	while i < positions.shape[0]:
@@ -236,8 +236,9 @@ def start(runloop, charts, *args):
 	for i in range(charts.shape[1]):
 		prev_result = result
 
-		positions, result = check_sl(positions, charts[-1][i], result, stats)
-		positions, result = check_tp(positions, charts[-1][i], result, stats)
+		if np.any(charts[-1][i] != 0):
+			positions, result = check_sl(positions, charts[-1][i], result, stats)
+			positions, result = check_tp(positions, charts[-1][i], result, stats)
 
 		for j in range(charts.shape[0]):
 			if np.any(charts[j][i] != 0):
@@ -257,8 +258,9 @@ def step(runloop, charts, *args):
 	for i in range(charts.shape[1]):
 		prev_result = result
 
-		positions, result = check_sl(positions, charts[-1][i], result, stats)
-		positions, result = check_tp(positions, charts[-1][i], result, stats)
+		if np.any(charts[-1][i] != 0):
+			positions, result = check_sl(positions, charts[-1][i], result, stats)
+			positions, result = check_tp(positions, charts[-1][i], result, stats)
 
 		for j in range(charts.shape[0]):
 			if np.any(charts[j][i] != 0):

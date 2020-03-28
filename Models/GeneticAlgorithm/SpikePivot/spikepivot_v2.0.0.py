@@ -27,7 +27,7 @@ Data Preprocessing
 dl = DataLoader()
 
 start = dt.datetime(2019,1,1)
-end = dt.datetime(2020,1,1)
+end = dt.datetime(2020,3,1)
 
 data_split = 0.7
 stoprange = 200.0
@@ -79,11 +79,11 @@ def isShortSpike(data, threshold):
 	return True
 
 # @jit
-def getTrainData(data):
+def getTrainData(data, timestamps):
 	spike_threshold = 1.0
 	lookback = 3
 	out_data = np.array([[0,0],[0,0]], dtype=np.float32) # LONG DIST, SHORT DIST
-	plan_data = np.array([0,0], dtype=np.float32)
+	plan_data = np.array([0,0,0], dtype=np.float32)
 
 	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
 	ad_data = [0,0,0,0, max(data[:lookback,1]), min(data[:lookback,2])] 
@@ -112,6 +112,8 @@ def getTrainData(data):
 			ad_data[0] = data[i-s_idx, 1]
 			ad_data[1] = ad_data[5]
 
+			ad_data[5] = min(data[i-s_idx, 2], data[i, 2])
+
 			body = convertToPips(data[i-s_idx, 3] - data[i-s_idx, 0])
 
 			if body >= 0:
@@ -130,6 +132,8 @@ def getTrainData(data):
 			ad_data[2] = data[i-s_idx, 2]
 			ad_data[3] = ad_data[4]
 
+			ad_data[4] = max(data[i-s_idx, 1], data[i, 1])
+
 			body = convertToPips(data[i-s_idx, 0] - data[i-s_idx, 3])
 
 			if body >= 0:
@@ -143,13 +147,23 @@ def getTrainData(data):
 		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
 		ad_data[5] = data[i,2] if data[i,2] < ad_data[5] else ad_data[5]
 
+		time = dl.convertTimestampToTime(timestamps[i])
+		time = dl.convertTimezone(time, 'Europe/London')
+		if time.weekday() == 4 and time.hour >= 16:
+			plan_data[2] = 0
+		else:
+			plan_data[2] = 1
+
 		X_out.append(out_data)
 		X_plan.append(plan_data)
 
 	return X_out, X_plan
 
 timer = timeit()
-train_data, plan_data = getTrainData(np.round(df_h4.values[:,4:], decimals=5))
+train_data, plan_data = getTrainData(
+	np.round(df_h4.values[:,4:], decimals=5),
+	df_h4.index.values
+)
 train_data = np.array(train_data, dtype=np.float32)
 plan_data = np.array(plan_data, dtype=np.float32)
 timer.end()
@@ -241,8 +255,6 @@ print('\nTrain Data: {} {} H4: {}'.format(X_train.shape, y_train.shape, num_trai
 print('Train Plan Data: {}\n{}'.format(X_train_plan.shape, X_train_plan[:5]))
 print('\nVal Data: {} {} H4: {}'.format(X_val.shape, y_val.shape, num_val_h4))
 print('Val Plan Data: {}\n{}'.format(X_val_plan.shape, X_val_plan[:5]))
-
-raise SystemExit()
 
 '''
 Create Genetic Model
@@ -380,24 +392,35 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		sl = 80.0
+		risk = 1.0
 		tp_increment = 55.0
 		c_dir = bt.get_direction(positions, 0)
 
 		# H4
 		if j == 0:
-			# BUY Signal
-			if plan[data[0]][0] != 0 and charts[j][i][7] > plan[data[0]][0]:
-				if c_dir == bt.SELL:
-					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl)
-				elif c_dir == 0:
-					positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl)
+			if plan[int(data[0])][0] == 0:
+				data[1] = 0
+			if plan[int(data[0])][1] == 0:
+				data[2] = 0
 
-			# SELL Signal
-			elif plan[data[0]][1] != 0 and charts[j][i][7] < plan[data[0]][1]:
-				if c_dir == bt.BUY:
-					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl)
-				elif c_dir == 0:
-					positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl)
+			if int(data[0]) > 0 and plan[int(data[0])][2] == 1:
+				# BUY Signal
+				if plan[int(data[0])-1][0] != 0 and charts[j][i][7] > plan[int(data[0])-1][0]:
+					if plan[int(data[0])-1][0] != data[1]:
+						if c_dir == bt.SELL:
+							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+						elif c_dir == 0:
+							positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+					data[1] = plan[int(data[0])-1][0]
+
+				# SELL Signal
+				elif plan[int(data[0])-1][1] != 0 and charts[j][i][7] < plan[int(data[0])-1][1]:
+					if plan[int(data[0])-1][1] != data[2]:
+						if c_dir == bt.BUY:
+							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+						elif c_dir == 0:
+							positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+					data[2] = plan[int(data[0])-1][1]
 
 			data[0] += 1
 
@@ -460,5 +483,4 @@ ga.fit(
 	val_data=(X_val_norm, y_val),
 	generations=100
 )
-
 
