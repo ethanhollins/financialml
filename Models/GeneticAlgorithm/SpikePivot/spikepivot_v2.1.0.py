@@ -26,8 +26,8 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2017,1,1)
-end = dt.datetime(2018,1,1)
+start = dt.datetime(2018,1,1)
+end = dt.datetime(2019,1,1)
 
 data_split = 0.7
 num_years = end.year - start.year
@@ -424,23 +424,26 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 				data[2] = 0
 
 			if int(data[0]) > 0 and plan[int(data[0])][2] == 1:
+
 				# BUY Signal
 				if plan[int(data[0])-1][0] != 0 and charts[j][i][7] > plan[int(data[0])-1][0]:
-					if plan[int(data[0])-1][0] != data[1]:
-						if c_dir == bt.SELL:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
-					data[1] = plan[int(data[0])-1][0]
+					if out[int(data[0])-1][0][0] >= threshold:
+						if plan[int(data[0])-1][0] != data[1]:
+							if c_dir == bt.SELL:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+						data[1] = plan[int(data[0])-1][0]
 
 				# SELL Signal
 				elif plan[int(data[0])-1][1] != 0 and charts[j][i][7] < plan[int(data[0])-1][1]:
-					if plan[int(data[0])-1][1] != data[2]:
-						if c_dir == bt.BUY:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
-					data[2] = plan[int(data[0])-1][1]
+					if out[int(data[0])-1][1][0] >= threshold:
+						if plan[int(data[0])-1][1] != data[2]:
+							if c_dir == bt.BUY:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+						data[2] = plan[int(data[0])-1][1]
 
 			data[0] += 1
 
@@ -488,7 +491,7 @@ ga = GA.GeneticAlgorithm(
 )
 
 ga.setSeed(1)
-ga.saveBest(10, 'v2.0.0_010117', {'mean': float(mean), 'std': float(std)})
+ga.saveBest(10, 'v2.1.0_010118', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -496,7 +499,7 @@ def generate_models(num_models):
 		models.append(GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5))
 	return models
 
-num_models = 5000
+num_models = 100
 ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),

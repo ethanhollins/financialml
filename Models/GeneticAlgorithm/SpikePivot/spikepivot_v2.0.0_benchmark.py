@@ -351,9 +351,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		if training:
-			min_trades = (num_years * 60) * data_split
+			min_trades = (num_years * 48) * data_split
 		else:
-			min_trades = (num_years * 60) * (1 - data_split)
+			min_trades = (num_years * 48) * (1 - data_split)
 
 		num_trades = wins + losses
 		trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
@@ -389,10 +389,10 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			(self.val_results[4] + self.val_results[5])
 		)
 
-	# @jit
+	@jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		sl = 80.0
-		risk = 2.0
+		risk = 1.0
 		tp_increment = 55.0
 		c_dir = bt.get_direction(positions, 0)
 

@@ -26,8 +26,8 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2017,1,1)
-end = dt.datetime(2018,1,1)
+start = dt.datetime(2010,9,1)
+end = dt.datetime(2020,1,1)
 
 data_split = 0.7
 num_years = end.year - start.year
@@ -81,7 +81,8 @@ def isShortSpike(data, threshold):
 def getTrainData(data, timestamps):
 	spike_threshold = 1.0
 	lookback = 3
-	out_data = np.array([[0,0],[0,0]], dtype=np.float32) # LONG DIST, SHORT DIST
+	swing_count = 4
+	out_data = np.zeros((swing_count,1), dtype=np.float32) # LONG DIST, SHORT DIST
 	plan_data = np.array([0,0,0], dtype=np.float32)
 
 	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
@@ -93,14 +94,12 @@ def getTrainData(data, timestamps):
 		out_data = np.copy(out_data)
 		plan_data = np.copy(plan_data)
 
-		if plan_data[0]:
-			if data[i, 3] < ad_data[1]:
-				out_data[0] = np.zeros((1,2))
-				plan_data[0] = 0
-		if plan_data[1]:
-			if data[i, 3] > ad_data[3]:
-				out_data[1] = np.zeros((1,2))
-				plan_data[1] = 0
+		# if plan_data[0]:
+		# 	if data[i, 3] < ad_data[1]:
+		# 		plan_data[0] = 0
+		# if plan_data[1]:
+		# 	if data[i, 3] > ad_data[3]:
+		# 		plan_data[1] = 0
 
 		# Get Current Spike Info
 		if isLongSpike(
@@ -108,19 +107,15 @@ def getTrainData(data, timestamps):
 			spike_threshold
 		):
 			s_idx = int((lookback-1)/2)
+			
+
 			ad_data[0] = data[i-s_idx, 1]
 			ad_data[1] = ad_data[5]
 
 			ad_data[5] = min(data[i-s_idx, 2], data[i, 2])
 
-			body = convertToPips(data[i-s_idx, 3] - data[i-s_idx, 0])
-
-			if body >= 0:
-				wick = convertToPips(data[i-s_idx, 1] - data[i-s_idx, 3])
-			else:
-				wick = convertToPips(data[i-s_idx, 1] - data[i-s_idx, 0])
-
-			out_data[0] = [body, wick]
+			out_data[:(swing_count-1)] = out_data[-(swing_count-1):]
+			out_data[-1,0] = convertToPips(ad_data[0] - ad_data[1])
 			plan_data[0] = ad_data[0]
 
 		if isShortSpike(
@@ -140,7 +135,8 @@ def getTrainData(data, timestamps):
 			else:
 				wick = convertToPips(data[i-s_idx, 0] - data[i-s_idx, 2])
 
-			out_data[1] = [body, wick]
+			out_data[:(swing_count-1)] = out_data[-(swing_count-1):]
+			out_data[-1,0] = convertToPips(ad_data[2] - ad_data[3])
 			plan_data[1] = ad_data[2]
 
 		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
@@ -264,38 +260,37 @@ Create Genetic Model
 '''
 
 @jit(forceobj=True)
-def model_run(inpt, W1, W2, W3, b1, b2, b3):
-	x = np.matmul(inpt, W1) + b1
-	x = bt.relu(x)		
+def model_run(inpt, W1, W2, b1, b2):
+	for i in range(inpt.shape[1]):
+		c_i = inpt[:,i,:]
+		c_i = c_i.reshape(c_i.shape[0], 1, c_i.shape[1])
+		x = np.matmul(c_i, W1) + b1
+		x = bt.relu(x)
+
+		if i+1 == inpt.shape[1]:
+			break
+
+		x = np.matmul(x.reshape(x.shape[0], x.shape[2], x.shape[1]), np.ones([1,c_i.shape[2]]))
+		x = bt.relu(x.reshape(x.shape[0], x.shape[2], x.shape[1]))
+		W1 = x
+	
 	x = np.matmul(x, W2) + b2
-	x = bt.relu(x)
-	x = np.matmul(x, W3) + b3
+	x = bt.sigmoid(x).reshape(x.shape[0], x.shape[2])
 
-	x[:,:,:2] = bt.sigmoid(x[:,:,:2])
-
-	t_x = np.copy(x[:,:,2])
-	x[:,:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,:,2] = np.sum(x[:,:,2])/x[:,:,2].size
-	x[:,:,2] = np.round(x[:,:,2] * ((250-55) + 55))
-
-	t_x = np.copy(x[:,:,3])
-	x[:,:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,:,3] = np.sum(x[:,:,3])/x[:,:,3].size
-	x[:,:,3] = np.round(x[:,:,3] * ((200-25) + 25))
 	return x
 
-class BasicDenseModel(object):
-	def __init__(self, in_size, layers):
+class BasicRnnModel(object):
+	def __init__(self, in_shape, layers):
 		self._layers = layers
 		self.W = []
 		self.b = []
 		
-		self.createWb(in_size)
+		self.createWb(in_shape)
 
-	def createWb(self, in_size):
-		# Input layer
+	def createWb(self, in_shape):
+		# RNN Layer
 		self.W.append(
-			np.random.normal(size=(in_size, self._layers[0]))
+			np.random.normal(size=(in_shape[2], self._layers[0]))
 		)
 		self.b.append(
 			np.random.normal(size=(self._layers[0]))
@@ -319,16 +314,16 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		self.X_train_plan = X_train_plan
 		self.X_val_plan = X_val_plan
 		self.threshold = threshold
-		self.sl = 0
-		self.tp_increment = 0
+		self.sl = 80
+		self.tp_increment = 55
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
 		
 		if training:
 			out = self._model(X)
-			self.sl = min(max(out[0][0][2], 55), 250)
-			self.tp_increment = min(max(out[0][0][3], 25), 200)
+			# self.sl = min(max(out[0][0][2], 55), 250)
+			# self.tp_increment = min(max(out[0][0][3], 25), 200)
 
 			results = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
@@ -380,7 +375,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return ret - dd_mod - gpr_mod - trades_mod
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [8, 8, 4])
+		return BasicRnnModel(X_train_norm.shape, [32, 2])
 
 	def newModel(self):
 		return GeneticPlanModel(X_train_plan, X_val_plan, self.threshold)
@@ -426,21 +421,23 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if int(data[0]) > 0 and plan[int(data[0])][2] == 1:
 				# BUY Signal
 				if plan[int(data[0])-1][0] != 0 and charts[j][i][7] > plan[int(data[0])-1][0]:
-					if plan[int(data[0])-1][0] != data[1]:
-						if c_dir == bt.SELL:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
-					data[1] = plan[int(data[0])-1][0]
+					if out[int(data[0])-1][0] >= threshold:
+						if plan[int(data[0])-1][0] != data[1]:
+							if c_dir == bt.SELL:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+						data[1] = plan[int(data[0])-1][0]
 
 				# SELL Signal
 				elif plan[int(data[0])-1][1] != 0 and charts[j][i][7] < plan[int(data[0])-1][1]:
-					if plan[int(data[0])-1][1] != data[2]:
-						if c_dir == bt.BUY:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
-					data[2] = plan[int(data[0])-1][1]
+					if out[int(data[0])-1][1] >= threshold:
+						if plan[int(data[0])-1][1] != data[2]:
+							if c_dir == bt.BUY:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+						data[2] = plan[int(data[0])-1][1]
 
 			data[0] += 1
 
@@ -487,8 +484,8 @@ ga = GA.GeneticAlgorithm(
 	survival_rate=0.2
 )
 
-ga.setSeed(1)
-ga.saveBest(10, 'v2.0.0_010117', {'mean': float(mean), 'std': float(std)})
+# ga.setSeed(1)
+# ga.saveBest(10, 'v2.0.0_010117', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -501,6 +498,6 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),
 	val_data=(X_val_norm, y_val),
-	generations=5
+	generations=20
 )
 

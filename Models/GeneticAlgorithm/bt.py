@@ -1,6 +1,7 @@
 from numba.targets.registry import CPUDispatcher
 from numba import jit
 import numpy as np
+import cupy as cp
 
 '''
 Backtester
@@ -133,7 +134,7 @@ def get_total_profit(positions, ohlc):
 
 	return profit
 
-# @jit
+@jit
 def check_sl(positions, ohlc, result, stats):
 	i = 0
 	while i < positions.shape[0]:
@@ -225,7 +226,7 @@ def get_stats(stats, result, prev_result):
 
 	return stats
 
-# @jit
+@jit
 def start(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
 	data = np.zeros((10,), dtype=np.float32)
@@ -290,14 +291,24 @@ def matmul(x, y):
 def relu(x):
 	return np.maximum(0, x)
 
+def relu_gpu(x):
+	return cp.maximum(0, x)
+
 @jit
 def elu(x):
 	x[x<0] = np.exp(x[x<0]) - 1
 	return x
 
+def elu_gpu(x):
+	x[x<0] = cp.exp(x[x<0]) - 1
+	return x
+
 @jit
 def sigmoid(x):
 	return 1 / (1 + np.exp(-x))
+
+def sigmoid_gpu(x):
+	return 1 / (1 + cp.exp(-x))
 
 @jit
 def softmax(x):

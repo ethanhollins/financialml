@@ -1,10 +1,13 @@
 from numba import jit
 import numpy as np
+import cupy as cp
 import math
 import sys
 import time
 import json
 import os
+
+import bt
 
 '''
 Generic functions
@@ -101,27 +104,38 @@ class PreserveBestCrossover(object):
 		result = [models[x[0]] for x in fit_sorted[:int(len(fit_sorted) * self._preserve_rate)]]
 		i=0
 		while len(result) < self._num_models:
-			mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
-			for m in mates:
-				i_weights = models[i].getWeights()
-				m_weights = models[m].getWeights()
-
-				new_weights = self._crossover_func(
-					i_weights, m_weights
-				)
-
-				new_model = models[i].newModel()
-				new_model.setModelInfo(models[i].getModelInfo())
+			# Random 10%
+			if len(result) < int(len(fit_sorted) * (self._preserve_rate + 0.1)):
+				new_model = models[0].newModel()
+				new_model.setModelInfo(models[0].getModelInfo())
 				gen_model = new_model.generateModel(
 					new_model.getModelInfo()
 				)
 				new_model.setModel(gen_model)
-				new_model.setWeights(new_weights)
-
 				result.append(new_model)
-				if len(result) >= self._num_models:
-					return result
-			i = (i+1)%len(models)
+			# Crossover remaining
+			else:
+				mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
+				for m in mates:
+					i_weights = models[i].getWeights()
+					m_weights = models[m].getWeights()
+
+					new_weights = self._crossover_func(
+						i_weights, m_weights
+					)
+
+					new_model = models[i].newModel()
+					new_model.setModelInfo(models[i].getModelInfo())
+					gen_model = new_model.generateModel(
+						new_model.getModelInfo()
+					)
+					new_model.setModel(gen_model)
+					new_model.setWeights(new_weights)
+
+					result.append(new_model)
+					if len(result) >= self._num_models:
+						return result
+				i = (i+1)%len(models)
 		return result
 
 ### Mutate Functions
@@ -273,13 +287,14 @@ class GeneticAlgorithm(object):
 
 	def __init__(self, 
 		crossover_opt, mutation_opt=None,
-		survival_rate=0.5
+		survival_rate=0.5, is_gpu=False
 	):
 		self._crossover_opt = crossover_opt
 		self._mutation_opt = mutation_opt
 		self._survival_rate = survival_rate
 		self._save = []
 		self._save_best = None
+		self.is_gpu = is_gpu
 
 	def add(self, model):
 		self._models.append(model)
@@ -296,13 +311,23 @@ class GeneticAlgorithm(object):
 
 
 		if batch_size:
+			if self.is_gpu:
+				X_gpu = [train_data[0][i*batch_size:i*batch_size+batch_size] for i in math.ceil(train_data[0].shape[0]/batch_size)]
+				self._train_data_gpu = X_gpu
+
 			X = [train_data[0][i*batch_size:i*batch_size+batch_size] for i in math.ceil(train_data[0].shape[0]/batch_size)]
 			y = [train_data[0][i*batch_size:i*batch_size+batch_size] for i in math.ceil(train_data[0].shape[0]/batch_size)]
 			self._train_data = (X, y)
 		else:
+			if self.is_gpu:
+				self._train_data_gpu = [cp.asarray(train_data[0])]
+
 			self._train_data = ([train_data[0]], [train_data[1]])
 
 		if val_data:
+			if self.is_gpu:
+				self._val_data_gpu = cp.asarray(val_data[0])
+
 			self._val_data = (val_data[0], val_data[1])
 		else:
 			self._val_data = None
@@ -338,13 +363,21 @@ class GeneticAlgorithm(object):
 			mod = self._models[i]
 			batch = []
 			for j in range(len(self._train_data[0])):
-				batch.append(
-					mod(self._train_data[0][j], self._train_data[1][j], training=True)
-				)
+				if self.is_gpu:
+					batch.append(
+						mod(self._train_data_gpu[j], self._train_data[1][j], training=True)
+					)
+				else:
+					batch.append(
+						mod(self._train_data[0][j], self._train_data[1][j], training=True)
+					)
 			train_fit.append(batch)
 
 			if self._val_data:
-				val_fit.append(mod(*self._val_data))
+				if self.is_gpu:
+					val_fit.append(mod(self._val_data_gpu, self._val_data[1]))
+				else:
+					val_fit.append(mod(*self._val_data))
 
 			progress = int((i+1)/num_models * 20.0)
 			print('({}) Progress: [{}{}] - {}/{} '.format(
@@ -369,7 +402,11 @@ class GeneticAlgorithm(object):
 		)
 
 	def select(self, fit):
-		fit_scaled = (fit - fit.min()) / (fit.max() - fit.min())
+		if fit.max() != fit.min():	
+			fit_scaled = (fit - fit.min()) / (fit.max() - fit.min())
+		else:
+			fit_scaled = fit / fit.min()
+
 		fit_sorted = sorted(enumerate(fit_scaled), key=lambda x: x[1], reverse=True)
 
 		fit_selected = []
@@ -455,10 +492,14 @@ class GeneticAlgorithm(object):
 					os.makedirs(path)
 				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
 				
-				weights = {'weights': [x.tolist() for x in self._models[i[1]].getWeights()]}
-				weights.update(i[3])
+				info = {'weights': [x.tolist() for x in self._models[i[1]].getWeights()]}
+				info.update(i[3])
+				try:
+					info.update(self._models[i[1]].save())
+				except:
+					pass
 				with open(path_weights, 'w') as f:
-					f.write(json.dumps(weights, indent=2))
+					f.write(json.dumps(info, indent=2))
 
 	def _onSaveBest(self, train_fit, val_fit):
 		if self._save_best:
@@ -475,9 +516,326 @@ class GeneticAlgorithm(object):
 					os.makedirs(path)
 				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
 				
-				weights = {'weights': [x.tolist() for x in self._models[i[0]].getWeights()]}
-				weights.update(self._save_best[2])
+				info = {'weights': [x.tolist() for x in self._models[i[0]].getWeights()]}
+				info.update(self._save_best[2])
+				try:
+					info.update(self._models[i[0]].save())
+				except:
+					pass
+
 				with open(path_weights, 'w') as f:
-					f.write(json.dumps(weights, indent=2))
+					f.write(json.dumps(info, indent=2))
 
 				count += 1
+
+
+'''
+ML Layers
+'''
+
+# Dense layer
+class Dense(object):
+	def __init__(self, in_size, hl_size):
+		self.init_weights(in_size, hl_size)
+
+	def init_weights(self, in_size, hl_size):
+		self.weights = np.random.normal(size=(hl_size, in_size))
+		self.bias = np.random.normal(size=(hl_size, in_size))
+
+	def __call__(self, data):
+		return Dense.run(data)
+
+	@jit(forceobj=True)
+	def run(data):
+		return np.dot(self.weights, data) + self.bias
+
+
+# LSTM layer
+class LSTM(object):
+	def __init__(self, in_size, hl_size, out_size):
+		self.in_size = in_size
+		self.hl_size = hl_size
+		self.out_size = out_size
+		self.init_weights(in_size, hl_size, out_size)
+
+	# Initialize Weights and Biases
+	def init_weights(self, in_size, hl_size, out_size):
+		weights_xi = np.random.normal(size=(hl_size, in_size))
+		weights_xf = np.random.normal(size=(hl_size, in_size))
+		weights_xl = np.random.normal(size=(hl_size, in_size))
+		weights_xo = np.random.normal(size=(hl_size, in_size))
+		self.weights_x = np.concatenate((
+			weights_xi, weights_xf, weights_xl, weights_xo
+		))
+
+		bias_xi = np.random.normal(size=(hl_size))
+		bias_xf = np.random.normal(size=(hl_size))
+		bias_xl = np.random.normal(size=(hl_size))
+		bias_xo = np.random.normal(size=(hl_size))
+		self.bias_x = np.concatenate((
+			bias_xi, bias_xf, bias_xl, bias_xo
+		))
+
+		weights_hi = np.random.normal(size=(hl_size, hl_size))
+		weights_hf = np.random.normal(size=(hl_size, hl_size))
+		weights_hl = np.random.normal(size=(hl_size, hl_size))
+		weights_ho = np.random.normal(size=(hl_size, hl_size))
+		self.weights_h = np.concatenate((
+			weights_hi, weights_hf, weights_hl, weights_ho
+		))
+
+		bias_hi = np.random.normal(size=(hl_size))
+		bias_hf = np.random.normal(size=(hl_size))
+		bias_hl = np.random.normal(size=(hl_size))
+		bias_ho = np.random.normal(size=(hl_size))
+		self.bias_h = np.concatenate((
+			bias_hi, bias_hf, bias_hl, bias_ho
+		))
+
+		self.weights_out = np.random.normal(size=(hl_size, out_size))
+		self.bias_out = np.random.normal(size=(out_size))
+
+	def get_weights(self):
+		return [
+			np.copy(self.weights_x), np.copy(self.bias_x),
+			np.copy(self.weights_h), np.copy(self.bias_h),
+			np.copy(self.weights_out), np.copy(self.bias_out)
+		]
+
+	def set_weights(self, weights):
+		self.weights_x = weights[0]
+		self.bias_x = weights[1]
+		self.weights_h = weights[2]
+		self.bias_h = weights[3]
+		self.weights_out = weights[4]
+		self.bias_out = weights[5]
+
+	def __call__(self, data):
+		return LSTM.run(
+			data, self.hl_size, self.out_size, 
+			self.weights_x, self.bias_x, 
+			self.weights_h, self.bias_h, 
+			self.weights_out, self.bias_out
+		)
+
+	def run(
+		data, hl_size, out_size, weights_x, bias_x, 
+		weights_h, bias_h, weights_out, bias_out
+	):
+		# Initialize cell and hidden states with zeroes
+		h = np.zeros(hl_size)
+		c = np.zeros(hl_size)
+		off = hl_size
+
+		f = LSTM.forget_gate(data.T, h, weights_h[off:off*2], bias_h[off:off*2], weights_x[off:off*2], bias_x[off:off*2], c)
+		i = LSTM.input_gate(data.T, h, weights_h[0:off], bias_h[0:off], weights_x[0:off], bias_x[0:off],
+				weights_h[off*2:off*3], bias_h[off*2:off*3], weights_x[off*2:off*3], bias_x[off*2:off*3])
+		c = LSTM.cell_state(f, i)
+		h = LSTM.output_gate(data.T, h, weights_h[off*3:off*4], bias_h[off*3:off*4], weights_x[off*3:off*4], bias_x[off*3:off*4], c)
+		return LSTM.model_output(h, weights_out, bias_out)
+
+	def forget_gate(x, h, weights_hf, bias_hf, weights_xf, bias_xf, prev_cell_state):
+		forget_hidden = np.dot(weights_hf, h) + bias_hf
+		forget_eventx = np.dot(weights_xf, x).T + bias_xf
+		return np.multiply(bt.sigmoid(forget_hidden + forget_eventx), prev_cell_state)
+
+	def input_gate(
+		x, h, 
+		weights_hi, bias_hi, 
+		weights_xi, bias_xi, 
+		weights_hl, bias_hl, 
+		weights_xl, bias_xl
+	):
+		ignore_hidden = np.dot(weights_hi, h) + bias_hi
+		ignore_eventx = np.dot(weights_xi, x).T + bias_xi
+		learn_hidden = np.dot(weights_hl, h) + bias_hl
+		learn_eventx = np.dot(weights_xl, x).T + bias_xl
+		return np.multiply(bt.sigmoid(ignore_eventx + ignore_hidden), np.tanh(learn_eventx + learn_hidden))
+
+	def cell_state(forget_gate_output, input_gate_output):
+		return forget_gate_output + input_gate_output
+
+	def output_gate(x, h, weights_ho, bias_ho, weights_xo, bias_xo, cell_state):
+		out_hidden = np.dot(weights_ho, h) + bias_ho
+		out_eventx = np.dot(weights_xo, x).T + bias_xo
+		return np.multiply(bt.sigmoid(out_eventx + out_hidden), np.tanh(cell_state))
+
+	def model_output(lstm_output, weights_out, bias_out):
+	  '''Takes the LSTM output and transforms it to our desired 
+	  output size using a final, fully connected layer'''
+	  return np.dot(lstm_output, weights_out) + bias_out
+
+# LSTM GPU layer
+class LSTM_GPU(object):
+	def __init__(self, in_size, hl_size, out_size):
+		self.in_size = in_size
+		self.hl_size = hl_size
+		self.out_size = out_size
+		self.init_weights(in_size, hl_size, out_size)
+
+	# Initialize Weights and Biases
+	def init_weights(self, in_size, hl_size, out_size):
+		weights_xi = cp.random.normal(size=(hl_size, in_size))
+		weights_xf = cp.random.normal(size=(hl_size, in_size))
+		weights_xl = cp.random.normal(size=(hl_size, in_size))
+		weights_xo = cp.random.normal(size=(hl_size, in_size))
+		self.weights_x = cp.concatenate((
+			weights_xi, weights_xf, weights_xl, weights_xo
+		))
+
+		bias_xi = cp.random.normal(size=(hl_size))
+		bias_xf = cp.random.normal(size=(hl_size))
+		bias_xl = cp.random.normal(size=(hl_size))
+		bias_xo = cp.random.normal(size=(hl_size))
+		self.bias_x = cp.concatenate((
+			bias_xi, bias_xf, bias_xl, bias_xo
+		))
+
+		weights_hi = cp.random.normal(size=(hl_size, hl_size))
+		weights_hf = cp.random.normal(size=(hl_size, hl_size))
+		weights_hl = cp.random.normal(size=(hl_size, hl_size))
+		weights_ho = cp.random.normal(size=(hl_size, hl_size))
+		self.weights_h = cp.concatenate((
+			weights_hi, weights_hf, weights_hl, weights_ho
+		))
+
+		bias_hi = cp.random.normal(size=(hl_size))
+		bias_hf = cp.random.normal(size=(hl_size))
+		bias_hl = cp.random.normal(size=(hl_size))
+		bias_ho = cp.random.normal(size=(hl_size))
+		self.bias_h = cp.concatenate((
+			bias_hi, bias_hf, bias_hl, bias_ho
+		))
+
+		self.weights_out = cp.random.normal(size=(hl_size, out_size))
+		self.bias_out = cp.random.normal(size=(out_size))
+
+	def get_weights(self):
+		return [
+			cp.asnumpy(self.weights_x), cp.asnumpy(self.bias_x),
+			cp.asnumpy(self.weights_h), cp.asnumpy(self.bias_h),
+			cp.asnumpy(self.weights_out), cp.asnumpy(self.bias_out)
+		]
+
+	def set_weights(self, weights):
+		self.weights_x = cp.asarray(weights[0])
+		self.bias_x = cp.asarray(weights[1])
+		self.weights_h = cp.asarray(weights[2])
+		self.bias_h = cp.asarray(weights[3])
+		self.weights_out = cp.asarray(weights[4])
+		self.bias_out = cp.asarray(weights[5])
+
+	def __call__(self, data):
+
+		return LSTM_GPU.run(
+			data, self.hl_size, self.out_size, 
+			self.weights_x, self.bias_x, 
+			self.weights_h, self.bias_h, 
+			self.weights_out, self.bias_out
+		)
+
+	def run(
+		data, hl_size, out_size, weights_x, bias_x, 
+		weights_h, bias_h, weights_out, bias_out
+	):
+		# Initialize cell and hidden states with zeroes
+		h = cp.zeros(hl_size)
+		c = cp.zeros(hl_size)
+		off = hl_size
+
+		f = LSTM_GPU.forget_gate(data.T, h, weights_h[off:off*2], bias_h[off:off*2], weights_x[off:off*2], bias_x[off:off*2], c)
+		i = LSTM_GPU.input_gate(data.T, h, weights_h[0:off], bias_h[0:off], weights_x[0:off], bias_x[0:off],
+				weights_h[off*2:off*3], bias_h[off*2:off*3], weights_x[off*2:off*3], bias_x[off*2:off*3])
+		c = LSTM_GPU.cell_state(f, i)
+		h = LSTM_GPU.output_gate(data.T, h, weights_h[off*3:off*4], bias_h[off*3:off*4], weights_x[off*3:off*4], bias_x[off*3:off*4], c)
+		return LSTM_GPU.model_output(h, weights_out, bias_out)
+
+	def forget_gate(x, h, weights_hf, bias_hf, weights_xf, bias_xf, prev_cell_state):
+		forget_hidden = cp.dot(weights_hf, h) + bias_hf
+		forget_eventx = cp.dot(weights_xf, x).T + bias_xf
+		return cp.multiply(bt.sigmoid_gpu(forget_hidden + forget_eventx), prev_cell_state)
+
+	def input_gate(
+		x, h, 
+		weights_hi, bias_hi, 
+		weights_xi, bias_xi, 
+		weights_hl, bias_hl, 
+		weights_xl, bias_xl
+	):
+		ignore_hidden = cp.dot(weights_hi, h) + bias_hi
+		ignore_eventx = cp.dot(weights_xi, x).T + bias_xi
+		learn_hidden = cp.dot(weights_hl, h) + bias_hl
+		learn_eventx = cp.dot(weights_xl, x).T + bias_xl
+		return cp.multiply(bt.sigmoid_gpu(ignore_eventx + ignore_hidden), cp.tanh(learn_eventx + learn_hidden))
+
+	def cell_state(forget_gate_output, input_gate_output):
+		return forget_gate_output + input_gate_output
+
+	def output_gate(x, h, weights_ho, bias_ho, weights_xo, bias_xo, cell_state):
+		out_hidden = cp.dot(weights_ho, h) + bias_ho
+		out_eventx = cp.dot(weights_xo, x).T + bias_xo
+		return cp.multiply(bt.sigmoid_gpu(out_eventx + out_hidden), cp.tanh(cell_state))
+
+	def model_output(lstm_output, weights_out, bias_out):
+	  '''Takes the LSTM output and transforms it to our desired 
+	  output size using a final, fully connected layer'''
+	  return cp.dot(lstm_output, weights_out) + bias_out
+
+
+# RNN GPU layer
+class RNN_1D_GPU(object):
+	def __init__(self, hl_size, out_size):
+		self.hl_size = hl_size
+		self.out_size = out_size
+		self.init_weights(hl_size, out_size)
+
+	# Initialize Weights and Biases
+	def init_weights(self, hl_size, out_size):
+		self.weights_x = cp.random.normal(size=(hl_size, 1))
+		self.bias_x = cp.random.normal(size=(hl_size))
+
+		self.weights_out = cp.random.normal(size=(hl_size, out_size))
+		self.bias_out = cp.random.normal(size=(out_size))
+
+	def get_weights(self):
+		return [
+			cp.asnumpy(self.weights_x), cp.asnumpy(self.bias_x),
+			cp.asnumpy(self.weights_out), cp.asnumpy(self.bias_out)
+		]
+
+	def set_weights(self, weights):
+		self.weights_x = cp.asarray(weights[0])
+		self.bias_x = cp.asarray(weights[1])
+		self.weights_out = cp.asarray(weights[2])
+		self.bias_out = cp.asarray(weights[3])
+
+	def __call__(self, data):
+
+		return RNN_1D_GPU.run(
+			data, self.hl_size, 
+			self.weights_x, self.bias_x, 
+			self.weights_out, self.bias_out
+		)
+
+	def run(
+		data, hl_size, 
+		weights_x, bias_x, 
+		weights_out, bias_out
+	):
+		# Initialize cell and hidden states with zeroes
+		c = cp.ones((data.shape[0], hl_size))
+		off = hl_size
+
+		for i in range(data.shape[1]):
+			c = RNN_1D_GPU.output_gate(data[:,i,:].T, weights_x, bias_x, c)
+
+		return RNN_1D_GPU.model_output(c, weights_out, bias_out)
+
+	def output_gate(x, weights_x, bias_x, cell_state):
+		out_eventx = cp.dot(weights_x, x).T + bias_x
+		return cp.multiply(bt.relu_gpu(out_eventx), cell_state)
+
+	def model_output(lstm_output, weights_out, bias_out):
+	  '''Takes the LSTM output and transforms it to our desired 
+	  output size using a final, fully connected layer'''
+	  return cp.dot(lstm_output, weights_out) + bias_out

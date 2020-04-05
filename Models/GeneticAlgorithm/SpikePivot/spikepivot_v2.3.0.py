@@ -81,7 +81,8 @@ def isShortSpike(data, threshold):
 def getTrainData(data, timestamps):
 	spike_threshold = 1.0
 	lookback = 3
-	out_data = np.array([[0,0],[0,0]], dtype=np.float32) # LONG DIST, SHORT DIST
+	swing_count = 2
+	out_data = np.zeros((swing_count,1), dtype=np.float32) # LONG DIST, SHORT DIST
 	plan_data = np.array([0,0,0], dtype=np.float32)
 
 	# Spike LONG, Swing LONG, Spike SHORT, Swing SHORT, Current High, Current Low
@@ -93,14 +94,12 @@ def getTrainData(data, timestamps):
 		out_data = np.copy(out_data)
 		plan_data = np.copy(plan_data)
 
-		if plan_data[0]:
-			if data[i, 3] < ad_data[1]:
-				out_data[0] = np.zeros((1,2))
-				plan_data[0] = 0
-		if plan_data[1]:
-			if data[i, 3] > ad_data[3]:
-				out_data[1] = np.zeros((1,2))
-				plan_data[1] = 0
+		# if plan_data[0]:
+		# 	if data[i, 3] < ad_data[1]:
+		# 		plan_data[0] = 0
+		# if plan_data[1]:
+		# 	if data[i, 3] > ad_data[3]:
+		# 		plan_data[1] = 0
 
 		# Get Current Spike Info
 		if isLongSpike(
@@ -108,19 +107,15 @@ def getTrainData(data, timestamps):
 			spike_threshold
 		):
 			s_idx = int((lookback-1)/2)
+			
+
 			ad_data[0] = data[i-s_idx, 1]
 			ad_data[1] = ad_data[5]
 
 			ad_data[5] = min(data[i-s_idx, 2], data[i, 2])
 
-			body = convertToPips(data[i-s_idx, 3] - data[i-s_idx, 0])
-
-			if body >= 0:
-				wick = convertToPips(data[i-s_idx, 1] - data[i-s_idx, 3])
-			else:
-				wick = convertToPips(data[i-s_idx, 1] - data[i-s_idx, 0])
-
-			out_data[0] = [body, wick]
+			out_data[:(swing_count-1)] = out_data[-(swing_count-1):]
+			out_data[-1,0] = convertToPips(ad_data[0] - ad_data[1])
 			plan_data[0] = ad_data[0]
 
 		if isShortSpike(
@@ -140,7 +135,8 @@ def getTrainData(data, timestamps):
 			else:
 				wick = convertToPips(data[i-s_idx, 0] - data[i-s_idx, 2])
 
-			out_data[1] = [body, wick]
+			out_data[:(swing_count-1)] = out_data[-(swing_count-1):]
+			out_data[-1,0] = convertToPips(ad_data[2] - ad_data[3])
 			plan_data[1] = ad_data[2]
 
 		ad_data[4] = data[i,1] if data[i,1] > ad_data[4] else ad_data[4]
@@ -265,50 +261,90 @@ Create Genetic Model
 
 @jit(forceobj=True)
 def model_run(inpt, W1, W2, W3, b1, b2, b3):
-	x = np.matmul(inpt, W1) + b1
-	x = bt.relu(x)		
-	x = np.matmul(x, W2) + b2
-	x = bt.relu(x)
+	for i in range(inpt.shape[1]):
+		c_i = inpt[:,i,:]
+		c_i = c_i.reshape(c_i.shape[0], 1, c_i.shape[1])
+
+		x = np.matmul(c_i, W1) + b1
+		x = bt.relu(x)
+
+		if i+1 == inpt.shape[1]:
+			break
+
+		x = np.matmul(x.reshape(x.shape[0], x.shape[2], x.shape[1]), np.ones([1,c_i.shape[2]]))
+		x = bt.relu(x.reshape(x.shape[0], x.shape[2], x.shape[1]))
+		W1 = x
+	
+	inpt2 = bt.relu(x).reshape(x.shape[0], x.shape[2], x.shape[1])
+
+	for i in range(inpt2.shape[1]):
+		c_i = inpt2[:,i,:]
+		c_i = c_i.reshape(c_i.shape[0], 1, c_i.shape[1])
+
+		x = np.matmul(c_i, W2) + b2
+		x = bt.relu(x)
+
+		if i+1 == inpt2.shape[1]:
+			break
+
+		x = np.matmul(x.reshape(x.shape[0], x.shape[2], x.shape[1]), np.ones([1,c_i.shape[2]]))
+		x = bt.relu(x.reshape(x.shape[0], x.shape[2], x.shape[1]))
+		W2 = x
+
 	x = np.matmul(x, W3) + b3
+	x = x.reshape(x.shape[0], x.shape[2])
 
-	x[:,:,:2] = bt.sigmoid(x[:,:,:2])
+	x[:,:2] = bt.sigmoid(x[:,:2])
 
-	t_x = np.copy(x[:,:,2])
-	x[:,:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,:,2] = np.sum(x[:,:,2])/x[:,:,2].size
-	x[:,:,2] = np.round(x[:,:,2] * ((250-55) + 55))
+	t_x = np.copy(x[:,2])
 
-	t_x = np.copy(x[:,:,3])
-	x[:,:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-	x[:,:,3] = np.sum(x[:,:,3])/x[:,:,3].size
-	x[:,:,3] = np.round(x[:,:,3] * ((200-25) + 25))
+	if t_x.max() == t_x.min():
+		x[:,2] = (t_x - t_x.min())
+	else:
+		x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
+	# x[:,2] = np.sum(x[:,2])/x[:,2].size
+	x[:,2] = np.round(x[:,2] * ((250-55) + 55))
+
+	t_x = np.copy(x[:,3])
+	if t_x.max() == t_x.min():
+		x[:,3] = (t_x - t_x.min())
+	else:
+		x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
+	# x[:,3] = np.sum(x[:,3])/x[:,3].size
+	x[:,3] = np.round(x[:,3] * ((200-25) + 25))
+
 	return x
 
-class BasicDenseModel(object):
-	def __init__(self, in_size, layers):
+class BasicRnnModel(object):
+	def __init__(self, in_shape, layers):
 		self._layers = layers
 		self.W = []
 		self.b = []
 		
-		self.createWb(in_size)
+		self.createWb(in_shape)
 
-	def createWb(self, in_size):
-		# Input layer
+	def createWb(self, in_shape):
+		# RNN Layer
 		self.W.append(
-			np.random.normal(size=(in_size, self._layers[0]))
+			np.random.normal(size=(in_shape[2], self._layers[0]))
 		)
 		self.b.append(
 			np.random.normal(size=(self._layers[0]))
 		)
 
-		# Hidden Layers
-		for i in range(1, len(self._layers)):
-			self.W.append(
-				np.random.normal(size=(self._layers[i-1], self._layers[i]))
-			)
-			self.b.append(
-				np.random.normal(size=(self._layers[i]))
-			)
+		self.W.append(
+			np.random.normal(size=(in_shape[2], self._layers[1]))
+		)
+		self.b.append(
+			np.random.normal(size=(self._layers[1]))
+		)
+
+		self.W.append(
+			np.random.normal(size=(self._layers[1], self._layers[2]))
+		)
+		self.b.append(
+			np.random.normal(size=(self._layers[2]))
+		)
 
 	def __call__(self, inpt):
 		return model_run(inpt, *self.W, *self.b)
@@ -319,20 +355,18 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		self.X_train_plan = X_train_plan
 		self.X_val_plan = X_val_plan
 		self.threshold = threshold
-		self.sl = 0
-		self.tp_increment = 0
 
 	def __call__(self, X, y, training=False):
 		super().__call__(X, y)
 		
 		if training:
 			out = self._model(X)
-			self.sl = min(max(out[0][0][2], 55), 250)
-			self.tp_increment = min(max(out[0][0][3], 25), 200)
+			# self.sl = min(max(out[0][0][2], 55), 250)
+			# self.tp_increment = min(max(out[0][0][3], 25), 200)
 
 			results = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				out[:,:2], self.X_train_plan, self.sl, self.tp_increment
+				out, self.X_train_plan
 			)
 			results = [
 				results[0], # Return
@@ -346,7 +380,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			results = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				self._model(X)[:,:2], self.X_val_plan, self.sl, self.tp_increment
+				self._model(X), self.X_val_plan
 			)
 			results = [
 				results[0], # Return
@@ -366,13 +400,19 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-2, 0), 2)
+		# if dd < 2:
+		# 	dd_mod = pow(dd, 2)
+		# elif dd > 4:
+		# 	dd_mod = pow(dd-4, 2)
+		# else:
+		# 	dd_mod = 0
+		dd_mod = pow(max(dd-3, 0), 2)
 		gpr_mod = pow(max(gpr-5,0), 2)
 
 		if training:
-			min_trades = (num_years * 48) * data_split
+			min_trades = (num_years * 24) * data_split
 		else:
-			min_trades = (num_years * 48) * (1 - data_split)
+			min_trades = (num_years * 24) * (1 - data_split)
 
 		num_trades = wins + losses
 		trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
@@ -380,7 +420,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		return ret - dd_mod - gpr_mod - trades_mod
 
 	def generateModel(self, model_info):
-		return BasicDenseModel(2, [8, 8, 4])
+		return BasicRnnModel(X_train_norm.shape, [8, 8, 4])
 
 	def newModel(self):
 		return GeneticPlanModel(X_train_plan, X_val_plan, self.threshold)
@@ -395,8 +435,8 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		self._model.W = [np.copy(i) for i in weights[:len(self._model.W)]]
 		self._model.b = [np.copy(i) for i in weights[len(self._model.W):]]
 
-	def save(self):
-		return {'sl': float(self.sl), 'tp_increment': float(self.tp_increment)}
+	# def save(self):
+	# 	return {'sl': float(self.sl), 'tp_increment': float(self.tp_increment)}
 
 	def __str__(self):
 		return  ' (Train) Perf: {:.2f}\t% Ret: {:.2f}%\t% DD: {:.2f}%\tGPR: {:.2f}\tTrades: {}\n' \
@@ -412,9 +452,11 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		)
 
 	@jit
-	def run(i, j, positions, charts, result, data, stats, threshold, out, plan, sl, tp_increment):
+	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		risk = 1.0
 		c_dir = bt.get_direction(positions, 0)
+		sl = min(max(out[int(data[0])-1][2], 55), 250)
+		tp_increment = min(max(out[int(data[0])-1][3], 25), 200)
 
 		# H4
 		if j == 0:
@@ -426,21 +468,23 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if int(data[0]) > 0 and plan[int(data[0])][2] == 1:
 				# BUY Signal
 				if plan[int(data[0])-1][0] != 0 and charts[j][i][7] > plan[int(data[0])-1][0]:
-					if plan[int(data[0])-1][0] != data[1]:
-						if c_dir == bt.SELL:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
-					data[1] = plan[int(data[0])-1][0]
+					if out[int(data[0])-1][0] >= threshold:
+						if plan[int(data[0])-1][0] != data[1]:
+							if c_dir == bt.SELL:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+						data[1] = plan[int(data[0])-1][0]
 
 				# SELL Signal
 				elif plan[int(data[0])-1][1] != 0 and charts[j][i][7] < plan[int(data[0])-1][1]:
-					if plan[int(data[0])-1][1] != data[2]:
-						if c_dir == bt.BUY:
-							positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
-						elif c_dir == 0:
-							positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
-					data[2] = plan[int(data[0])-1][1]
+					if out[int(data[0])-1][1] >= threshold:
+						if plan[int(data[0])-1][1] != data[2]:
+							if c_dir == bt.BUY:
+								positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+							elif c_dir == 0:
+								positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+						data[2] = plan[int(data[0])-1][1]
 
 			data[0] += 1
 
@@ -487,8 +531,8 @@ ga = GA.GeneticAlgorithm(
 	survival_rate=0.2
 )
 
-ga.setSeed(1)
-ga.saveBest(10, 'v2.0.0_010117', {'mean': float(mean), 'std': float(std)})
+# ga.setSeed(1)
+# ga.saveBest(10, 'v2.0.0_010117', {'mean': float(mean), 'std': float(std)})
 
 def generate_models(num_models):
 	models = []
@@ -501,6 +545,6 @@ ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),
 	val_data=(X_val_norm, y_val),
-	generations=5
+	generations=50
 )
 
