@@ -293,7 +293,8 @@ class GeneticAlgorithm(object):
 		self._mutation_opt = mutation_opt
 		self._survival_rate = survival_rate
 		self._save = []
-		self._save_best = None
+		self._save_best_train = None
+		self._save_best_mp = None
 		self.is_gpu = is_gpu
 
 	def add(self, model):
@@ -346,7 +347,8 @@ class GeneticAlgorithm(object):
 			self._onSave(generation)
 
 			if generation+1 == generations:
-				self._onSaveBest(train_fit, val_fit)
+				self._onSaveBestTrain(train_fit)
+				self._onSaveBestMP(train_fit, val_fit)
 			else:
 				self.optimize(np.array(train_fit))
 
@@ -456,7 +458,7 @@ class GeneticAlgorithm(object):
 				val_best, val_median
 			))
 
-		for i in sorted(enumerate(train_arr), key=lambda x: x[1], reverse=True)[:5]:
+		for i in sorted(enumerate(train_arr), key=lambda x: x[1], reverse=True)[:3]:
 			print(' ({}):\n{}'.format(i[0], self._models[i[0]]))
 
 		if len(val_fit) > 0:
@@ -464,7 +466,7 @@ class GeneticAlgorithm(object):
 			mid = (train_arr + np.array(val_fit)) / 2.0
 			count = 0
 			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
-				if count >= 5:
+				if count >= 1:
 					break
 
 				if i[1] != 0.0:
@@ -480,8 +482,11 @@ class GeneticAlgorithm(object):
 	def save(self, gen, model_num, name, data={}):
 		self._save.append((gen, model_num, name, data))
 
-	def saveBest(self, num_models, name, data={}):
-		self._save_best = (num_models, name, data)
+	def saveBestTrain(self, num_models, name, data={}):
+		self._save_best_train = (num_models, name, data)
+
+	def saveBestMP(self, num_models, name, data={}):
+		self._save_best_mp = (num_models, name, data)
 
 	def _onSave(self, gen):
 		for i in self._save:
@@ -501,23 +506,49 @@ class GeneticAlgorithm(object):
 				with open(path_weights, 'w') as f:
 					f.write(json.dumps(info, indent=2))
 
-	def _onSaveBest(self, train_fit, val_fit):
-		if self._save_best:
+	def _onSaveBestTrain(self, train_fit):
+		if self._save_best_train:
 			train_arr = np.array(train_fit)[:,0]
-			mid = (train_arr + np.array(val_fit)) / 2.0
 			count = 0
-			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
-				if count >= self._save_best[0]:
+			for i in sorted(enumerate(train_arr), key=lambda x: x[1], reverse=True):
+				if count >= self._save_best_train[0]:
 					break
 
 				print('Saving...\n%s' % self._models[i[0]])
-				path = os.path.join('saved', '{}'.format(self._save_best[1]))
+				path = os.path.join('saved', '{}'.format(self._save_best_train[1]))
 				if not os.path.exists(path):
 					os.makedirs(path)
 				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
 				
 				info = {'weights': [x.tolist() for x in self._models[i[0]].getWeights()]}
-				info.update(self._save_best[2])
+				info.update(self._save_best_train[2])
+				try:
+					info.update(self._models[i[0]].save())
+				except:
+					pass
+
+				with open(path_weights, 'w') as f:
+					f.write(json.dumps(info, indent=2))
+
+				count += 1
+
+	def _onSaveBestMP(self, train_fit, val_fit):
+		if self._save_best_mp:
+			train_arr = np.array(train_fit)[:,0]
+			mid = (train_arr + np.array(val_fit)) / 2.0
+			count = 0
+			for i in sorted(enumerate(mid), key=lambda x: x[1], reverse=True):
+				if count >= self._save_best_mp[0]:
+					break
+
+				print('Saving...\n%s' % self._models[i[0]])
+				path = os.path.join('saved', '{}'.format(self._save_best_mp[1]))
+				if not os.path.exists(path):
+					os.makedirs(path)
+				path_weights = os.path.join(path, '{}.json'.format(len(os.listdir(path))))
+				
+				info = {'weights': [x.tolist() for x in self._models[i[0]].getWeights()]}
+				info.update(self._save_best_mp[2])
 				try:
 					info.update(self._models[i[0]].save())
 				except:
@@ -822,7 +853,6 @@ class RNN_1D_GPU(object):
 		weights_x, bias_x, 
 		weights_out, bias_out
 	):
-		# Initialize cell and hidden states with zeroes
 		c = cp.ones((data.shape[0], hl_size))
 		off = hl_size
 
@@ -836,6 +866,72 @@ class RNN_1D_GPU(object):
 		return cp.multiply(bt.relu_gpu(out_eventx), cell_state)
 
 	def model_output(lstm_output, weights_out, bias_out):
-	  '''Takes the LSTM output and transforms it to our desired 
-	  output size using a final, fully connected layer'''
 	  return cp.dot(lstm_output, weights_out) + bias_out
+
+# RNN (w/ Ignore Gate) GPU layer
+class RNN_TWO_GPU(object):
+	def __init__(self, inpt_size, hl_size, out_size):
+		self.hl_size = hl_size
+		self.init_weights(inpt_size, hl_size, out_size)
+
+	# Initialize Weights and Biases
+	def init_weights(self, inpt_size, hl_size, out_size):
+		weights_xo = cp.random.normal(size=(hl_size, inpt_size))
+		weights_xi = cp.random.normal(size=(hl_size, inpt_size))
+
+		self.weights_x = cp.concatenate((
+			weights_xo, weights_xi
+		))
+
+		bias_xo = cp.random.normal(size=(hl_size))
+		bias_xi = cp.random.normal(size=(hl_size))
+
+		self.bias_x = cp.concatenate((
+			bias_xo, bias_xi
+		))
+
+		self.weights_out = cp.random.normal(size=(hl_size, out_size))
+		self.bias_out = cp.random.normal(size=(out_size))
+
+	def get_weights(self):
+		return [
+			cp.asnumpy(self.weights_x), cp.asnumpy(self.bias_x),
+			cp.asnumpy(self.weights_out), cp.asnumpy(self.bias_out)
+		]
+
+	def set_weights(self, weights):
+		self.weights_x = cp.asarray(weights[0])
+		self.bias_x = cp.asarray(weights[1])
+		self.weights_out = cp.asarray(weights[2])
+		self.bias_out = cp.asarray(weights[3])
+
+	def __call__(self, data):
+
+		return RNN_TWO_GPU.run(
+			data, self.hl_size, 
+			self.weights_x, self.bias_x, 
+			self.weights_out, self.bias_out
+		)
+
+	def run(
+		data, hl_size, 
+		weights_x, bias_x, 
+		weights_out, bias_out
+	):
+		c = cp.ones((data.shape[0], hl_size))
+		off = hl_size
+
+		for i in range(data.shape[1]):
+			c = RNN_TWO_GPU.output_gate(data[:,i,:].T, weights_x[:off], bias_x[:off], weights_x[off:off*2], bias_x[off:off*2], c)
+
+		return RNN_TWO_GPU.model_output(c, weights_out, bias_out)
+
+	def output_gate(x, weights_xo, bias_xo, weights_xi, bias_xi, cell_state):
+		out_eventx = cp.dot(weights_xo, x).T + bias_xo
+		ignore_eventx = cp.dot(weights_xi, x).T + bias_xi
+		x_out = cp.multiply(bt.sigmoid_gpu(ignore_eventx), bt.relu_gpu(out_eventx))
+		return cp.multiply(x_out, cell_state)
+
+	def model_output(lstm_output, weights_out, bias_out):
+	  return cp.dot(lstm_output, weights_out) + bias_out
+

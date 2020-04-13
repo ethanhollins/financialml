@@ -12,6 +12,11 @@ SELL = -1
 
 pos_count = 10
 pos_params = 5
+data_count = 10
+
+@jit
+def convertToPrice(x):
+	return np.around(x / 10000, 5)
 
 @jit
 def convertToPips(x):
@@ -99,7 +104,20 @@ def get_sl(positions, i):
 	return positions[i][2]
 
 @jit
-def modify_sl(positions, i, sl):
+def modify_sl(positions, i, ohlc, sl):
+	if positions[i][0] == BUY:
+		close = ohlc[7]
+		price = positions[i][1] - convertToPrice(sl)
+		dist = convertToPips(close - price)
+		if dist < 4.0:
+			return positions
+	elif positions[i][0] == SELL:
+		close = ohlc[3]
+		price = positions[i][1] + convertToPrice(sl)
+		dist = convertToPips(price - close)
+		if dist < 4.0:
+			return positions
+		
 	positions[i][2] = sl
 	return positions
 
@@ -229,7 +247,7 @@ def get_stats(stats, result, prev_result):
 @jit
 def start(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
-	data = np.zeros((10,), dtype=np.float32)
+	data = np.zeros((data_count,), dtype=np.float32)
 	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
@@ -247,11 +265,11 @@ def start(runloop, charts, *args):
 
 		stats = get_stats(stats, result, prev_result)
 
-	return stats
+	return stats, data
 
 def step(runloop, charts, *args):
 	positions = np.zeros((pos_count,pos_params), dtype=np.float32)
-	data = np.zeros((10,), dtype=np.float32)
+	data = np.zeros((data_count,), dtype=np.float32)
 	stats = np.zeros((7,), dtype=np.float32)
 	result = 0.0
 	prev_result = 0.0
@@ -271,7 +289,7 @@ def step(runloop, charts, *args):
 
 		stats = get_stats(stats, result, prev_result)
 
-	return stats
+	return stats, data
 
 '''
 Activation Functions and NN functions
