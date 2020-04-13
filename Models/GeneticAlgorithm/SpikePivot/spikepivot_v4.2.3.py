@@ -1,11 +1,6 @@
 import sys
 sys.path.append('../')
 
-try:
-	import cupy as cp
-except:
-	pass
-
 from DataLoader import DataLoader
 from numba import jit
 import GA
@@ -31,7 +26,7 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2015,1,1)
+start = dt.datetime(2019,1,1)
 end = dt.datetime(2020,1,1)
 
 data_split = 0.7
@@ -196,7 +191,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		self.threshold = threshold
 
 	def __call__(self, X, y, training=False):
-		super().__call__(cp.asnumpy(X), y)
+		super().__call__(X, y)
 		
 		out = self.getOutput(X)
 		
@@ -238,7 +233,6 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		# Process model output
 		x = self._model[0](X)
 		# x = self._model[1](x.reshape(x.shape[0], x.shape[1], 1))
-		x = cp.asnumpy(x)
 		x = bt.sigmoid(x)
 
 
@@ -272,7 +266,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-6, 0), 3)
+		dd_mod = pow(max(dd-3, 0), 3)
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		num_trades = wins + losses
@@ -293,7 +287,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def generateModel(self, model_info):
 		return [
-			GA.RNN_TWO_GPU(3, 64, 5),
+			GA.RNN_TWO(3, 64, 5),
 			# GA.RNN_TWO_1D_GPU(16, 4),
 		]
 
@@ -414,12 +408,12 @@ Create Genetic Algorithm
 
 bt.recompile_all()
 
-crossover = GA.PreserveBestCrossover(preserve_rate=0.5)
-mutation = GA.PreserveBestMutation(mutation_rate=0.02, preserve_rate=0.5)
+crossover = GA.PreserveBestCrossover(preserve_rate=0.2)
+mutation = GA.PreserveBestMutation(mutation_rate=0.05, preserve_rate=0.2)
 ga = GA.GeneticAlgorithm(
 	crossover, mutation,
-	survival_rate=0.2,
-	is_gpu=True
+	survival_rate=0.25,
+	is_gpu=False
 )
 
 ga.setSeed(1)
@@ -431,7 +425,7 @@ def generate_models(num_models):
 		models.append(GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5))
 	return models
 
-num_models = 100
+num_models = 200
 ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),

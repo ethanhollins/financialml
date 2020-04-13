@@ -1,7 +1,11 @@
 from numba.targets.registry import CPUDispatcher
 from numba import jit
 import numpy as np
-import cupy as cp
+
+try:
+	import cupy as cp
+except:
+	pass
 
 '''
 Backtester

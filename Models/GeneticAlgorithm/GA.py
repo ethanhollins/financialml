@@ -1,11 +1,15 @@
 from numba import jit
 import numpy as np
-import cupy as cp
 import math
 import sys
 import time
 import json
 import os
+
+try:
+	import cupy as cp
+except:
+	pass
 
 import bt
 
@@ -53,7 +57,7 @@ class GenericCrossover(object):
 	def __init__(self, crossover_func=generic_crossover):
 		self._crossover_func = crossover_func
 
-	def build(survival_rate, num_models):
+	def build(self, survival_rate, num_models):
 		self._survival_rate = survival_rate
 		self._num_models = num_models
 
@@ -61,27 +65,40 @@ class GenericCrossover(object):
 		models = [i for i in models[0]]
 
 		indices = np.arange(len(models))
+		i=0
 		result = []
-		for i in indices:
-			mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
-			for m in mates:
-				i_weights = models[i].getModel().get_weights()
-				m_weights = models[m].getModel().get_weights()
-
-				new_weights = self._crossover_func(
-					i_weights, m_weights
-				)
-
-				new_model = models[i].newModel()
+		while len(result) < self._num_models:
+			# Random 10%
+			if len(result) < int(len(models) * 0.1):
+				new_model = models[0].newModel()
+				new_model.setModelInfo(models[0].getModelInfo())
 				gen_model = new_model.generateModel(
-					models[i].getModelInfo()
+					new_model.getModelInfo()
 				)
 				new_model.setModel(gen_model)
-				new_model.setWeights(new_weights)
-
 				result.append(new_model)
-				if len(result) >= self._num_models:
-					return result
+			# Crossover remaining
+			else:
+				mates = np.random.choice(np.delete(indices, i), int(1/self._survival_rate), replace=False)
+				for m in mates:
+					i_weights = models[i].getWeights()
+					m_weights = models[m].getWeights()
+
+					new_weights = self._crossover_func(
+						i_weights, m_weights
+					)
+
+					new_model = models[i].newModel()
+					gen_model = new_model.generateModel(
+						models[i].getModelInfo()
+					)
+					new_model.setModel(gen_model)
+					new_model.setWeights(new_weights)
+
+					result.append(new_model)
+					if len(result) >= self._num_models:
+						return result
+				i = (i+1)%len(models)
 		return result
 
 
@@ -195,6 +212,7 @@ class GeneticAlgorithmModel(object):
 
 	def __init__(self):
 		self._model = None
+		self._model_info = None
 
 	def __call__(self, X, y, training=False):
 		if not self._model:
@@ -867,6 +885,73 @@ class RNN_1D_GPU(object):
 
 	def model_output(lstm_output, weights_out, bias_out):
 	  return cp.dot(lstm_output, weights_out) + bias_out
+
+# RNN (w/ Ignore Gate) layer
+class RNN_TWO(object):
+	def __init__(self, inpt_size, hl_size, out_size):
+		self.hl_size = hl_size
+		self.init_weights(inpt_size, hl_size, out_size)
+
+	# Initialize Weights and Biases
+	def init_weights(self, inpt_size, hl_size, out_size):
+		weights_xo = np.random.normal(size=(hl_size, inpt_size))
+		weights_xi = np.random.normal(size=(hl_size, inpt_size))
+
+		self.weights_x = np.concatenate((
+			weights_xo, weights_xi
+		))
+
+		bias_xo = np.random.normal(size=(hl_size))
+		bias_xi = np.random.normal(size=(hl_size))
+
+		self.bias_x = np.concatenate((
+			bias_xo, bias_xi
+		))
+
+		self.weights_out = np.random.normal(size=(hl_size, out_size))
+		self.bias_out = np.random.normal(size=(out_size))
+
+	def get_weights(self):
+		return [
+			np.copy(self.weights_x), np.copy(self.bias_x),
+			np.copy(self.weights_out), np.copy(self.bias_out)
+		]
+
+	def set_weights(self, weights):
+		self.weights_x = weights[0]
+		self.bias_x = weights[1]
+		self.weights_out = weights[2]
+		self.bias_out = weights[3]
+
+	def __call__(self, data):
+
+		return RNN_TWO.run(
+			data, self.hl_size, 
+			self.weights_x, self.bias_x, 
+			self.weights_out, self.bias_out
+		)
+
+	def run(
+		data, hl_size, 
+		weights_x, bias_x, 
+		weights_out, bias_out
+	):
+		c = np.ones((data.shape[0], hl_size))
+		off = hl_size
+
+		for i in range(data.shape[1]):
+			c = RNN_TWO.output_gate(data[:,i,:].T, weights_x[:off], bias_x[:off], weights_x[off:off*2], bias_x[off:off*2], c)
+
+		return RNN_TWO.model_output(c, weights_out, bias_out)
+
+	def output_gate(x, weights_xo, bias_xo, weights_xi, bias_xi, cell_state):
+		out_eventx = np.dot(weights_xo, x).T + bias_xo
+		ignore_eventx = np.dot(weights_xi, x).T + bias_xi
+		x_out = np.multiply(bt.sigmoid(ignore_eventx), bt.relu(out_eventx))
+		return np.multiply(x_out, cell_state)
+
+	def model_output(lstm_output, weights_out, bias_out):
+	  return np.dot(lstm_output, weights_out) + bias_out
 
 # RNN (w/ Ignore Gate) GPU layer
 class RNN_TWO_GPU(object):
