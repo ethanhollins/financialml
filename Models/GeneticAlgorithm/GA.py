@@ -422,6 +422,7 @@ class GeneticAlgorithm(object):
 		)
 
 	def select(self, fit):
+		fit[fit.argmin()] -= np.abs(fit.min())
 		if fit.max() != fit.min():	
 			fit_scaled = (fit - fit.min()) / (fit.max() - fit.min())
 		else:
@@ -493,6 +494,8 @@ class GeneticAlgorithm(object):
 
 	def setSeed(self, seed):
 		np.random.seed(seed)
+		if self.is_gpu:
+			cp.random.seed(seed)
 
 	def load(self):
 		return
@@ -951,7 +954,7 @@ class RNN_TWO(object):
 		return np.multiply(x_out, cell_state)
 
 	def model_output(lstm_output, weights_out, bias_out):
-	  return np.dot(lstm_output, weights_out) + bias_out
+		return np.dot(lstm_output, weights_out) + bias_out
 
 # RNN (w/ Ignore Gate) GPU layer
 class RNN_TWO_GPU(object):
@@ -975,8 +978,12 @@ class RNN_TWO_GPU(object):
 			bias_xo, bias_xi
 		))
 
-		self.weights_out = cp.random.normal(size=(hl_size, out_size))
-		self.bias_out = cp.random.normal(size=(out_size))
+		if out_size:
+			self.weights_out = cp.random.normal(size=(hl_size, out_size))
+			self.bias_out = cp.random.normal(size=(out_size))
+		else:
+			self.weights_out = cp.zeros(0)
+			self.bias_out = cp.zeros(0)
 
 	def get_weights(self):
 		return [
@@ -1009,7 +1016,10 @@ class RNN_TWO_GPU(object):
 		for i in range(data.shape[1]):
 			c = RNN_TWO_GPU.output_gate(data[:,i,:].T, weights_x[:off], bias_x[:off], weights_x[off:off*2], bias_x[off:off*2], c)
 
-		return RNN_TWO_GPU.model_output(c, weights_out, bias_out)
+		if weights_out.size != 0:
+			return RNN_TWO_GPU.model_output(c, weights_out, bias_out)
+		else:
+			return c
 
 	def output_gate(x, weights_xo, bias_xo, weights_xi, bias_xi, cell_state):
 		out_eventx = cp.dot(weights_xo, x).T + bias_xo

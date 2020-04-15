@@ -27,14 +27,14 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2017,1,1)
-end = dt.datetime(2019,1,1)
+start = dt.datetime(2019,4,1)
+end = dt.datetime(2020,7,1)
 
 num_months = round((end - start).days / 30.0)
-val_months = 3
+val_months = 1
 data_split = round((num_months-val_months) / num_months, 2)
 
-df_m = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=start, end=end)
+df_m = dl.get(Constants.GBPUSD, Constants.TEN_MINUTES, start=start, end=end)
 
 '''
 Feature Engineering
@@ -48,7 +48,7 @@ def normalize(x, mean, std):
 	return (x - mean) / std
 
 def getTrainData(data, timestamps):
-	data_points = 10
+	data_points = 12
 
 	X_out = []
 	X_plan = []
@@ -198,8 +198,8 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		out = self.getOutput(X)
 		
 		if training:
-			self.sl = min(max(out[0][2], 25.0), 80.0)
-			self.tp = min(max(out[0][3], 15.0), 80.0)
+			self.sl = min(max(out[0][2], 10.0), 80.0)
+			self.tp = min(max(out[0][3], 5.0), 80.0)
 			self.risk = min(max(out[0][4], 0.1), 2.0)
 			results, data = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
@@ -234,8 +234,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	def getOutput(self, X):
 		# Process model output
 		x = self._model[0](X)
-		x = self._model[1](x.reshape(x.shape[0], x.shape[1], 1))
-		# x = self._model[2](x.reshape(x.shape[0], x.shape[1], 1))
+		# x = self._model[1](x.reshape(x.shape[0], x.shape[1], 1))
 		x = cp.asnumpy(x)
 		x = bt.sigmoid(x)
 
@@ -245,14 +244,14 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			x[:,2] = (t_x - t_x.min())
 		else:
 			x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		x[:,2] = np.round(x[:,2] * ((150.0-25.0) + 25.0))
+		x[:,2] = np.round(x[:,2] * ((80.0-10.0) + 10.0))
 
 		t_x = np.copy(x[:,3])
 		if t_x.max() == t_x.min():
 			x[:,3] = (t_x - t_x.min())
 		else:
 			x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		x[:,3] = np.round(x[:,3] * ((150.0-15.0) + 15.0), decimals=2)
+		x[:,3] = np.round(x[:,3] * ((80.0-5.0) + 5.0), decimals=2)
 
 		t_x = np.copy(x[:,4])
 		if t_x.max() == t_x.min():
@@ -270,7 +269,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-5, 0), 3)
+		dd_mod = pow(max(dd-3, 0), 3)
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		num_trades = wins + losses
@@ -281,9 +280,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		max_trades_mod = (num_trades - max_trades)*2 if num_trades > max_trades else 0
 
 		if training:
-			min_trades = (num_months * 4) * data_split
+			min_trades = (num_months * 10) * data_split
 		else:
-			min_trades = (num_months * 4) * (1 - data_split)
+			min_trades = (num_months * 10) * (1 - data_split)
 
 		min_trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
 
@@ -291,25 +290,20 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def generateModel(self, model_info):
 		return [
-			GA.RNN_TWO_GPU(3, 32, None),
-			GA.RNN_TWO_GPU(1, 32, 5),
+			GA.RNN_TWO_GPU(3, 64, 5),
+			# GA.RNN_TWO_1D_GPU(16, 4),
 		]
 
 	def newModel(self):
 		return GeneticPlanModel(X_train_plan, X_val_plan, self.threshold)
 
 	def getWeights(self):
-		return (
-			self._model[0].get_weights() + 
-			self._model[1].get_weights()# +
-			# self._model[2].get_weights()
-		)
+		return self._model[0].get_weights()# + self._model[1].get_weights()
 
 	def setWeights(self, weights):
 		l = len(self._model[0].get_weights())
 		self._model[0].set_weights(weights[:l])
-		self._model[1].set_weights(weights[l:l*2])
-		# self._model[2].set_weights(weights[l*2:])
+		# self._model[1].set_weights(weights[l:])
 
 	# def save(self):
 	# 	return {'sl': float(self.sl), 'tp_increment': float(self.tp_increment)}
@@ -329,7 +323,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan, sl, tp, risk):
 		# Misc variables
-		risk = 1.0
+		# risk = 1.0
 
 		# OHLC values
 		high = charts[j][i][5]
@@ -394,19 +388,20 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			data[3] = 0
 		
 		# On close AB pivot (S&R)
-		if data[0] != 0 and close > data[0]:
-			data[0] = 0
-			if c_dir == bt.SELL:
-				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
-			elif c_dir == 0:
-				positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
+		if int(plan[i][0]) == 1:
+			if data[0] != 0 and close > data[0]:
+				data[0] = 0
+				if c_dir == bt.SELL:
+					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+				elif c_dir == 0:
+					positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
 
-		elif data[3] != 0 and close < data[3]:
-			data[3] = 0
-			if c_dir == bt.BUY:
-				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
-			elif c_dir == 0:
-				positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
+			elif data[3] != 0 and close < data[3]:
+				data[3] = 0
+				if c_dir == bt.BUY:
+					positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+				elif c_dir == 0:
+					positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
 
 		return positions, result, data, stats
 		
@@ -416,11 +411,11 @@ Create Genetic Algorithm
 
 bt.recompile_all()
 
-crossover = GA.PreserveBestCrossover(preserve_rate=0.5)
-mutation = GA.PreserveBestMutation(mutation_rate=0.05, preserve_rate=0.5)
+crossover = GA.PreserveBestCrossover(preserve_rate=0.2)
+mutation = GA.PreserveBestMutation(mutation_rate=0.05, preserve_rate=0.2)
 ga = GA.GeneticAlgorithm(
 	crossover, mutation,
-	survival_rate=0.2,
+	survival_rate=0.25,
 	is_gpu=True
 )
 
