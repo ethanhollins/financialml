@@ -27,14 +27,14 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2016,9,1)
-end = dt.datetime(2018,9,1)
+start = dt.datetime(2018,10,1)
+end = dt.datetime(2019,10,1)
 
 num_months = round((end - start).days / 30.0)
 val_months = 1
 data_split = round((num_months-val_months) / num_months, 2)
 
-df_m = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=start, end=end)
+df_m = dl.get(Constants.GBPUSD, Constants.FOUR_HOURS, start=start, end=end)
 
 '''
 Feature Engineering
@@ -48,7 +48,7 @@ def normalize(x, mean, std):
 	return (x - mean) / std
 
 def getTrainData(data, timestamps):
-	data_points = 4
+	data_points = 3
 
 	X_out = []
 	X_plan = []
@@ -274,7 +274,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-8, 0), 3)
+		dd_mod = pow(max(dd-4, 0), 3)
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		num_trades = wins + losses
@@ -285,9 +285,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		max_trades_mod = (num_trades - max_trades)*2 if num_trades > max_trades else 0
 
 		if training:
-			min_trades = (num_months * 12) * data_split
+			min_trades = (num_months * 8) * data_split
 		else:
-			min_trades = (num_months * 12) * (1 - data_split)
+			min_trades = (num_months * 8) * (1 - data_split)
 
 		min_trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
 
@@ -295,8 +295,8 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 	def generateModel(self, model_info):
 		return [
-			GA.RNN_TWO_GPU(5, 64, None),
-			GA.RNN_TWO_GPU(1, 64, 5),
+			GA.RNN_TWO_GPU(5, 16, None),
+			GA.RNN_TWO_GPU(1, 16, 5),
 			# GA.RNN_TWO_GPU(1, 32, 5),
 		]
 
@@ -404,6 +404,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			data[3] = 0
 		
 		# On close AB pivot (S&R)
+		# if plan[i][0] == 1:
 		if data[0] != 0 and close > data[0]:
 			data[0] = 0
 			if c_dir == bt.SELL:

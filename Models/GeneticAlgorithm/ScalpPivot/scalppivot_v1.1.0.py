@@ -27,11 +27,12 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2016,9,1)
-end = dt.datetime(2018,9,1)
+start = dt.datetime(2017,9,1)
+end = dt.datetime(2019,9,1)
 
 num_months = round((end - start).days / 30.0)
-val_months = 1
+print('Months: %s'%num_months)
+val_months = 1.0
 data_split = round((num_months-val_months) / num_months, 2)
 
 df_m = dl.get(Constants.GBPUSD, Constants.ONE_HOUR, start=start, end=end)
@@ -48,11 +49,11 @@ def normalize(x, mean, std):
 	return (x - mean) / std
 
 def getTrainData(data, timestamps):
-	data_points = 4
+	data_points = 12
 
 	X_out = []
 	X_plan = []
-	c_data = np.zeros((data_points,5), dtype=np.float32)
+	c_data = np.zeros((1,data_points,3), dtype=np.float32)
 	c_plan = np.zeros((3,))
 
 	last_hl = np.zeros((data_points,2), dtype=np.float32)
@@ -83,37 +84,34 @@ def getTrainData(data, timestamps):
 			c_plan[0] = 0
 		c_plan[1] = np.amax(last_hl[:,0])
 		c_plan[2] = np.amin(last_hl[:,1])
-		swing_dist_l = convertToPips(c_plan[1] - close)
-		swing_dist_s = convertToPips(close - c_plan[2])
 
-		c_data[:(data_points-1)] = c_data[-(data_points-1):]
-		c_data[-1,0] = size
-		c_data[-1,1] = wick_up
-		c_data[-1,2] = wick_down
-		c_data[-1,3] = swing_dist_l
-		c_data[-1,4] = swing_dist_s
+		c_data[:,:(data_points-1)] = c_data[:,-(data_points-1):]
+		c_data[0,-1,0] = size
+		c_data[0,-1,1] = wick_up
+		c_data[0,-1,2] = wick_down
 
 		if i >= data_points:
 			X_out.append(c_data)
 			X_plan.append(c_plan)
 
-		elif len(X_out) > 0:
-			X_out.append(np.zeros((data_points,3), dtype=np.float32))
-			X_plan.append(c_plan)
+	return np.array(X_out, dtype=np.float32), np.array(X_plan, dtype=np.float32)
 
-	return X_out, X_plan
+timestamps = df_m.index.values
+ohlc = np.round(df_m.values, decimals=5)
+print(ohlc.shape)
 
 timer = timeit()
-train_data, plan_data = getTrainData(
-	np.round(df_m.values[:,4:], decimals=5),
-	df_m.index.values
-)
-train_data = np.array(train_data, dtype=np.float32)
-plan_data = np.array(plan_data, dtype=np.float32)
+train_data, plan_data = getTrainData(ohlc[:,4:], timestamps)
 timer.end()
+
 print('Train Data:\n%s\n' % train_data[:5])
 print(train_data.shape)
 print('Plan Data:\n%s\n' % plan_data[:5])
+print(plan_data.shape)
+
+'''
+Organise Data
+'''
 
 train_size = int(train_data.shape[0] * data_split)
 
@@ -134,8 +132,6 @@ X_val_norm = normalize(X_val, mean, std)
 '''
 Charts processing
 '''
-# TODO: FIX for one minute chart only
-
 @jit
 def processChart(i, charts, timestamps, chart, chart_ts):
 	for j in range(chart_ts.shape[0]):
@@ -202,11 +198,9 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		out = self.getOutput(X)
 		
 		if training:
-			self.tp = min(max(out[0][3], 30.0), 200.0)
-			self.risk = min(max(out[0][4], 2.0), 0.5)
 			results, data = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				out, self.X_train_plan, self.tp, self.risk
+				out, self.X_train_plan
 			)
 			results = [
 				results[0], # Return
@@ -220,7 +214,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			results, data = bt.start(
 				GeneticPlanModel.run, y.astype(np.float32), self.threshold,
-				out, self.X_val_plan, self.tp, self.risk
+				out, self.X_val_plan
 			)
 			results = [
 				results[0], # Return
@@ -237,34 +231,17 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	def getOutput(self, X):
 		# Process model output
 		x = self._model[0](X)
-		x = self._model[1](x.reshape(x.shape[0], x.shape[1], 1))
-		# x = self._model[2](x.reshape(x.shape[0], x.shape[1], 1))
+		x = self._model[1](x.reshape((list(x.shape)+[1])))
 		x = cp.asnumpy(x)
 		x = bt.sigmoid(x)
 
-
-		t_x = np.copy(x[:,2])
-		if t_x.max() == t_x.min():
-			x[:,2] = (t_x - t_x.min())
-		else:
-			x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		x[:,2] = np.round(x[:,2] * ((130.0-50.0) + 50.0))
-
-		t_x = np.copy(x[:,3])
-		if t_x.max() == t_x.min():
-			x[:,3] = (t_x - t_x.min())
-		else:
-			x[:,3] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		x[:,3] = np.sum(x[:,3])/x[:,3].size
-		x[:,3] = np.round(x[:,3] * ((200.0-30.0) + 30.0), decimals=2)
-
-		t_x = np.copy(x[:,4])
-		if t_x.max() == t_x.min():
-			x[:,4] = (t_x - t_x.min())
-		else:
-			x[:,4] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		x[:,4] = np.sum(x[:,4])/x[:,4].size
-		x[:,4] = np.round(x[:,4] * ((2.0-0.5) + 0.5), decimals=2)
+		# t_x = np.copy(x[:,2])
+		# if t_x.max() == t_x.min():
+		# 	x[:,2] = (t_x - t_x.min())
+		# else:
+		# 	x[:,2] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
+		# x[:,2] = np.sum(x[:,2])/x[:,2].size
+		# x[:,2] = np.round(x[:,2] * ((30.0-5.0) + 5.0))
 
 		return x
 
@@ -274,7 +251,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-8, 0), 3)
+		dd_mod = pow(max(dd-6, 0), 3)
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		num_trades = wins + losses
@@ -285,18 +262,27 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		max_trades_mod = (num_trades - max_trades)*2 if num_trades > max_trades else 0
 
 		if training:
-			min_trades = (num_months * 12) * data_split
+			min_trades = (num_months * 8) * data_split
 		else:
-			min_trades = (num_months * 12) * (1 - data_split)
+			min_trades = (num_months * 8) * (1 - data_split)
 
 		min_trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
 
-		return ret - dd_mod - min_trades_mod# - gpr_mod
+		if losses == 0:
+			wl_mod = 1
+		else:
+			wl_mod = wins/losses + 1
+
+		if ret > 0:
+			return (ret*wl_mod) - dd_mod - min_trades_mod# - gpr_mod
+		else:
+			return ret - dd_mod - min_trades_mod# - gpr_mod
+
 
 	def generateModel(self, model_info):
 		return [
-			GA.RNN_TWO_GPU(5, 64, None),
-			GA.RNN_TWO_GPU(1, 64, 5),
+			GA.RNN_2D_GPU(3, 16, None),
+			GA.RNN_2D_GPU(1, 16, 4),
 			# GA.RNN_TWO_GPU(1, 32, 5),
 		]
 
@@ -332,95 +318,70 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 
 	@jit
-	def run(i, j, positions, charts, result, data, stats, threshold, out, plan, tp, risk):
+	def run(i, j, positions, charts, result, data, stats, threshold, out, plan):
 		# Misc variables
-		# risk = 1.0
+		sl = 80.0
+		risk = 1.0
 
 		# OHLC values
-		high = charts[j][i][5]
-		low = charts[j][i][6]
-		close = charts[j][i][7]
+		ohlc = charts[j][i]
 		
 		# Current direction		
 		c_dir = bt.get_direction(positions, 0)
 		num_pos = bt.get_num_positions(positions)
+		max_trades = 3
 
-		# TP Increment (Trailing stop)
-		for x in range(num_pos):
-			entry = positions[x][1]
-			pos_sl = bt.get_sl(positions, x)
-			direction = bt.get_direction(positions, x)
-
-			if direction == bt.BUY:
-				profit = bt.convertToPips(high - entry)
-				profit_multi = profit/tp
-
-				if profit_multi >= 2.0:
-					sl_pips = (np.floor(profit_multi)-1) * tp
-					if sl_pips > -pos_sl:
-						positions = bt.modify_sl(positions, x, charts[j][i], -sl_pips)
-
-			else:
-				profit = bt.convertToPips(entry - low)
-				profit_multi = profit/tp
-
-				if profit_multi >= 2.0:
-					sl_pips = (np.floor(profit_multi)-1) * tp
-					if sl_pips > -pos_sl:
-						positions = bt.modify_sl(positions, x, charts[j][i], -sl_pips)
+		'''
+		Set Pivot/Swing
+		'''
+		# LONG Pivot
+		if out[i,0][0] >= threshold:
+			data[0] = plan[i][1]
 		
-		# Set current swing
-		data[2] = low if low < data[2] else data[2]
-		data[5] = high if high > data[3] else data[2]
+		# LONG Swing
+		if out[i,0][1] >= threshold:
+			data[1] = plan[i][2]
 
-		# On set pivot
-		if out[i][0] > out[i][1]:
-			# LONG
-			if out[i][0] >= threshold:
-				# Set pivot
-				data[0] = plan[i][1]
-				# Set swing
-				data[1] = data[2]
-				# Reset Current swing
-				data[2] = low
-				data[6] = min(max(out[i][2], 50.0), 130.0)
-				data[7] = min(max(out[i][3], 15.0), 100.0)
-		else:
-			# SHORT
-			if out[i][1] >= threshold:
-				# Set pivot
-				data[3] = plan[i][2]
-				# Set swing
-				data[4] = data[5]
-				# Reset Current swing
-				data[5] = high
-				data[9] = min(max(out[i][2], 50.0), 130.0)
-				data[10] = min(max(out[i][3], 15.0), 100.0)
+		# SHORT Pivot
+		if out[i,0][2] >= threshold:
+			# Set pivot
+			data[2] = plan[i][2]
 
+		# SHORT Swing
+		if out[i,0][3] >= threshold:
+			data[3] = plan[i][1]
+
+		'''
+		On Cancel
+		'''
 		# On cancel pivot
-		if data[1] != 0 and close < data[1]:
+		if data[1] != 0 and ohlc[7] < data[1]:
 			data[0] = 0
-		if data[4] != 0 and close > data[4]:
-			data[3] = 0
+			if c_dir == bt.BUY:
+				positions, result = bt.close_all(positions, ohlc, result, stats)
+
+		if data[3] != 0 and ohlc[3] > data[3]:
+			data[2] = 0
+			if c_dir == bt.SELL:
+				positions, result = bt.close_all(positions, ohlc, result, stats)
 		
+		'''
+		On Entry
+		'''
 		# On close AB pivot (S&R)
-		if data[0] != 0 and close > data[0]:
+		if data[0] != 0 and ohlc[3] > data[0]:
 			data[0] = 0
 			if c_dir == bt.SELL:
-				data[8] = data[7]
-				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, data[6], 0, data[6]/risk)
-			elif c_dir == 0 or num_pos < 3:
-				data[8] = data[7]
-				positions = bt.create_position(positions, charts[j][i], bt.BUY, data[6], 0, data[6]/risk)
+				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
+			elif c_dir == 0 or num_pos < max_trades:
+				positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
 
-		elif data[3] != 0 and close < data[3]:
-			data[3] = 0
+		elif data[2] != 0 and ohlc[7] < data[2]:
+			data[2] = 0
 			if c_dir == bt.BUY:
-				data[11] = data[10]
-				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, data[9], 0, data[9]/risk)
-			elif c_dir == 0 or num_pos < 3:
-				data[11] = data[10]
-				positions = bt.create_position(positions, charts[j][i], bt.SELL, data[9], 0, data[9]/risk)
+				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
+			elif c_dir == 0 or num_pos < max_trades:
+				positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
 
 		return positions, result, data, stats
 		

@@ -336,6 +336,9 @@ def sigmoid_gpu(x):
 def softmax(x):
 	return np.exp(x) / np.sum(np.exp(x), axis=0)
 
+def softmax_gpu(x):
+	return cp.exp(x) / cp.sum(cp.exp(x), axis=0)
+
 '''
 Misc functions
 '''

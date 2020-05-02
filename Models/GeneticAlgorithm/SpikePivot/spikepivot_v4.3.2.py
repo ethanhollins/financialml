@@ -27,8 +27,8 @@ Data Preprocessing
 
 dl = DataLoader()
 
-start = dt.datetime(2017,1,1)
-end = dt.datetime(2018,1,1)
+start = dt.datetime(2015,2,1)
+end = dt.datetime(2020,2,1)
 
 num_months = round((end - start).days / 30.0)
 val_months = 3
@@ -261,7 +261,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			x[:,4] = (t_x - t_x.min())
 		else:
 			x[:,4] = (t_x - t_x.min()) / (t_x.max() - t_x.min())
-		# x[:,4] = np.sum(x[:,4])/x[:,4].size
+		x[:,4] = np.sum(x[:,4])/x[:,4].size
 		x[:,4] = np.round(x[:,4] * ((1.0-0.5) + 0.5), decimals=2)
 
 		return x
@@ -272,7 +272,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		else:
 			gpr = (gain / loss) + 1
 
-		dd_mod = pow(max(dd-3, 0), 3)
+		dd_mod = pow(max(dd-6, 0), 3)
 		gpr_mod = pow(max(gpr-3,0), 2)
 
 		num_trades = wins + losses
@@ -289,7 +289,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 
 		min_trades_mod = pow(min_trades - num_trades, 2) if num_trades < min_trades else 0
 
-		return ret - dd_mod - gpr_mod - min_trades_mod
+		return ret - dd_mod - min_trades_mod# - gpr_mod
 
 	def generateModel(self, model_info):
 		return [
@@ -331,7 +331,8 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 	@jit
 	def run(i, j, positions, charts, result, data, stats, threshold, out, plan, sl, tp, risk):
 		# Misc variables
-		# risk = 1.0
+		risk = 1.0
+		max_trades = 2
 
 		# OHLC values
 		high = charts[j][i][5]
@@ -368,7 +369,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 		
 		# Set current swing
 		data[2] = low if low < data[2] else data[2]
-		data[5] = high if high > data[3] else data[2]
+		data[5] = high if high > data[5] else data[5]
 
 		# On set pivot
 		if out[i][0] > out[i][1]:
@@ -406,7 +407,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if c_dir == bt.SELL:
 				data[8] = data[7]
 				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.BUY, sl, 0, sl/risk)
-			elif c_dir == 0 or num_pos < 3:
+			elif c_dir == 0 or num_pos < max_trades:
 				data[8] = data[7]
 				positions = bt.create_position(positions, charts[j][i], bt.BUY, sl, 0, sl/risk)
 
@@ -415,7 +416,7 @@ class GeneticPlanModel(GA.GeneticAlgorithmModel):
 			if c_dir == bt.BUY:
 				data[11] = data[10]
 				positions, result = bt.stop_and_reverse(positions, charts[j][i], result, stats, bt.SELL, sl, 0, sl/risk)
-			elif c_dir == 0 or num_pos < 3:
+			elif c_dir == 0 or num_pos < max_trades:
 				data[11] = data[10]
 				positions = bt.create_position(positions, charts[j][i], bt.SELL, sl, 0, sl/risk)
 
@@ -445,7 +446,7 @@ def generate_models(num_models):
 		models.append(GeneticPlanModel(X_train_plan, X_val_plan, threshold=0.5))
 	return models
 
-num_models = 250
+num_models = 100
 ga.fit(
 	models=generate_models(num_models),
 	train_data=(X_train_norm, y_train),

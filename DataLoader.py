@@ -221,6 +221,8 @@ class DataLoader(object):
 			return 60*3
 		elif period == Constants.FIVE_MINUTES:
 			return 60*5
+		elif period == Constants.TEN_MINUTES:
+			return 60*10
 		elif period == Constants.FIFTEEN_MINUTES:
 			return 60*15
 		elif period == Constants.THIRTY_MINUTES:
